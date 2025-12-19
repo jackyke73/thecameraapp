@@ -33,7 +33,9 @@
 		EA8604332EF60492001E427E /* Exceptions for "Brain" folder in "BoyfriendCameraTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				DirectorHUD.swift,
 				LocationManager.swift,
+				PhotoDirector.swift,
 				SunCalculator.swift,
 			);
 			target = EA9331662ECEB77100AD97A9 /* BoyfriendCameraTests */;
@@ -41,7 +43,9 @@
 		EA8604342EF60492001E427E /* Exceptions for "Brain" folder in "BoyfriendCameraUITests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				DirectorHUD.swift,
 				LocationManager.swift,
+				PhotoDirector.swift,
 				SunCalculator.swift,
 			);
 			target = EA9331702ECEB77100AD97A9 /* BoyfriendCameraUITests */;

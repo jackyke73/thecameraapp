@@ -3,10 +3,10 @@ import CoreLocation
 
 struct ContentView: View {
     @StateObject var cameraManager = CameraManager()
-    @StateObject var locationManager = LocationManager() // <--- NEW SENSOR
+    @StateObject var locationManager = LocationManager()
     
-    // Simple state to hold the sun result
-    @State var sunInfo: String = "Waiting for GPS..."
+    // This state holds the current advice from the Director
+    @State var currentAdvice: DirectorAdvice?
     
     var body: some View {
         ZStack {
@@ -14,53 +14,47 @@ struct ContentView: View {
             CameraPreview(cameraManager: cameraManager)
                 .ignoresSafeArea()
             
-            // 2. The HUD
+            // 2. The Director Interface
             VStack {
-                // Top Status Bar
-                HStack {
-                    // Person Indicator
-                    Circle()
-                        .fill(cameraManager.isPersonDetected ? Color.green : Color.red)
-                        .frame(width: 15, height: 15)
-                    
-                    Text(cameraManager.isPersonDetected ? "HUMAN" : "EMPTY")
-                        .font(.caption)
-                        .bold()
-                        .foregroundColor(cameraManager.isPersonDetected ? .green : .red)
-                        .padding(6)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(8)
-                    
-                    Spacer()
-                    
-                    // NEW: Sun Indicator
-                    Text(sunInfo)
-                        .font(.caption)
-                        .bold()
-                        .foregroundColor(.yellow)
-                        .padding(6)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(8)
-                }
-                .padding(.top, 50)
-                .padding(.horizontal)
-                
                 Spacer()
+                
+                // Only show advice if we have GPS data
+                if let advice = currentAdvice {
+                    DirectorHUD(advice: advice)
+                        .padding(.bottom, 50)
+                } else {
+                    Text("Acquiring GPS Signal...")
+                        .font(.caption)
+                        .padding()
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(10)
+                        .padding(.bottom, 50)
+                }
             }
         }
-        // This is the "Brain" Logic
-        .onReceive(locationManager.$location) { newLocation in
-            guard let loc = newLocation else { return }
-            
-            // MATH TIME: Run the calculation every time we move
-            let sunPos = SunCalculator.compute(date: Date(), coordinate: loc.coordinate)
-            
-            // Format the result nicely
-            let az = Int(sunPos.azimuth)
-            let el = Int(sunPos.elevation)
-            let status = sunPos.isGoldenHour ? "✨ GOLDEN" : "☀️ NORMAL"
-            
-            self.sunInfo = "\(status) | Az: \(az)° El: \(el)°"
+        // This logic runs 30 times a second (or whenever sensors change)
+        .onReceive(locationManager.$heading) { _ in
+            updateAdvice()
         }
+        .onReceive(locationManager.$location) { _ in
+            updateAdvice()
+        }
+    }
+    
+    func updateAdvice() {
+        guard let loc = locationManager.location else { return }
+        
+        // 1. Calculate Sun
+        let sunPos = SunCalculator.compute(date: Date(), coordinate: loc.coordinate)
+        
+        // 2. Ask the Director for advice
+        let advice = PhotoDirector.evaluate(
+            sunPosition: sunPos,
+            deviceHeading: locationManager.heading,
+            isPersonDetected: cameraManager.isPersonDetected
+        )
+        
+        // 3. Update the UI
+        self.currentAdvice = advice
     }
 }
