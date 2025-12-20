@@ -1,5 +1,3 @@
-#if canImport(UIKit)
-import Foundation
 import SwiftUI
 import AVFoundation
 import UIKit
@@ -11,84 +9,75 @@ struct CameraPreview: UIViewRepresentable {
         let view = CameraPreviewView()
         view.session = cameraManager.session
         
-        // 1. Tap to Focus
-        let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
-        view.addGestureRecognizer(tapGesture)
-        
-        // 2. Hold to Lock AE/AF
-        let longPress = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLongPress(_:)))
-        view.addGestureRecognizer(longPress)
+        // Tap Gesture
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        view.addGestureRecognizer(tap)
         
         return view
     }
 
     func updateUIView(_ uiView: CameraPreviewView, context: Context) {}
     
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
     
-    // The Bridge between UIKit gestures and SwiftUI Manager
     class Coordinator: NSObject {
         var parent: CameraPreview
-        
-        init(_ parent: CameraPreview) {
-            self.parent = parent
-        }
+        init(_ parent: CameraPreview) { self.parent = parent }
         
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
             guard let view = gesture.view as? CameraPreviewView else { return }
-            let location = gesture.location(in: view)
+            let point = gesture.location(in: view)
             
-            // Convert screen touch to Camera Focus Point (0.0 to 1.0)
-            let capturePoint = view.videoPreviewLayer.captureDevicePointConverted(fromLayerPoint: location)
+            // 1. Show Visual Feedback
+            view.showFocusBox(at: point)
             
-            // Visual Haptic
-            let generator = UIImpactFeedbackGenerator(style: .medium)
-            generator.impactOccurred()
-            
-            // Call Manager
+            // 2. Convert & Focus
+            let capturePoint = view.videoPreviewLayer.captureDevicePointConverted(fromLayerPoint: point)
             parent.cameraManager.setFocus(point: capturePoint)
             
-            // Optional: You could draw a box here using a UIView overlay, but keeping it simple for now.
-        }
-        
-        @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-            if gesture.state == .began {
-                let generator = UINotificationFeedbackGenerator()
-                generator.notificationOccurred(.success)
-                parent.cameraManager.lockFocusAndExposure()
-            }
+            // Haptic
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
     }
 }
 
-// Wrapper to expose the PreviewLayer for coordinate conversion
 class CameraPreviewView: UIView {
-    var videoPreviewLayer: AVCaptureVideoPreviewLayer {
-        return layer as! AVCaptureVideoPreviewLayer
-    }
-    
+    var videoPreviewLayer: AVCaptureVideoPreviewLayer { return layer as! AVCaptureVideoPreviewLayer }
     var session: AVCaptureSession? {
         get { return videoPreviewLayer.session }
         set { videoPreviewLayer.session = newValue }
     }
-    
-    override class var layerClass: AnyClass {
-        return AVCaptureVideoPreviewLayer.self
-    }
+    override class var layerClass: AnyClass { return AVCaptureVideoPreviewLayer.self }
     
     override func layoutSubviews() {
         super.layoutSubviews()
         videoPreviewLayer.frame = bounds
         videoPreviewLayer.videoGravity = .resizeAspectFill
     }
+    
+    // NEW: The Yellow Focus Box Animation
+    func showFocusBox(at point: CGPoint) {
+        let box = UIView(frame: CGRect(x: 0, y: 0, width: 70, height: 70))
+        box.center = point
+        box.layer.borderWidth = 1.5
+        box.layer.borderColor = UIColor.systemYellow.cgColor
+        box.backgroundColor = UIColor.clear
+        box.alpha = 0
+        
+        addSubview(box)
+        
+        // Animate: Scale down + Fade In -> Fade Out
+        box.transform = CGAffineTransform(scaleX: 1.5, y: 1.5)
+        box.alpha = 1.0
+        
+        UIView.animate(withDuration: 0.25, animations: {
+            box.transform = .identity
+        }) { _ in
+            UIView.animate(withDuration: 0.2, delay: 0.5, options: [], animations: {
+                box.alpha = 0
+            }) { _ in
+                box.removeFromSuperview()
+            }
+        }
+    }
 }
-
-#else
-import SwiftUI
-struct CameraPreview: View {
-    @ObservedObject var cameraManager: CameraManager
-    var body: some View { Text("Camera preview unavailable") }
-}
-#endif
