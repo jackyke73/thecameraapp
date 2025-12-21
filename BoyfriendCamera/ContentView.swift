@@ -1,13 +1,22 @@
 import SwiftUI
 import CoreLocation
 
+// --- 1. Enum ---
 enum AspectRatio: String, CaseIterable {
-    case fourThree = "4:3"; case sixteenNine = "16:9"; case square = "1:1"
+    case fourThree = "4:3"
+    case sixteenNine = "16:9"
+    case square = "1:1"
+    
     var value: CGFloat {
-        switch self { case .fourThree: return 4.0/3.0; case .sixteenNine: return 16.0/9.0; case .square: return 1.0 }
+        switch self {
+        case .fourThree: return 4.0 / 3.0
+        case .sixteenNine: return 16.0 / 9.0
+        case .square: return 1.0
+        }
     }
 }
 
+// --- 2. Main View ---
 struct ContentView: View {
     @StateObject var cameraManager = CameraManager()
     @StateObject var locationManager = LocationManager()
@@ -18,7 +27,12 @@ struct ContentView: View {
     @State private var showFlashAnimation = false
     @State private var isCapturing = false
     @State private var isZoomDialVisible = false
+    
     @State private var currentAspectRatio: AspectRatio = .fourThree
+    
+    // Gallery & Thumbnail States
+    @State private var showPhotoReview = false
+    @State private var thumbnailScale: CGFloat = 1.0
     
     // SETTINGS STATES
     @State private var showSettings = false
@@ -27,14 +41,15 @@ struct ContentView: View {
     @State private var focusValue: Float = 0.5
     @State private var torchValue: Float = 0.0
     
-    // NEW STATES
     @State private var isGridEnabled = false
     @State private var isTimerEnabled = false
     
     @State var targetLandmark = Landmark(name: "The Campanile", coordinate: CLLocationCoordinate2D(latitude: 37.8720, longitude: -122.2578))
+    
     var targetLandmarkBinding: Binding<MapLandmark> {
         Binding(get: { MapLandmark(name: targetLandmark.name, coordinate: targetLandmark.coordinate) }, set: { new in targetLandmark = Landmark(name: new.name, coordinate: new.coordinate) })
     }
+    
     @State private var startZoomValue: CGFloat = 1.0
     
     var body: some View {
@@ -42,7 +57,7 @@ struct ContentView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 
-                // 1. CAMERA & GRID
+                // 1. CAMERA
                 GeometryReader { geo in
                     let ratio = currentAspectRatio.value
                     let w = geo.size.width
@@ -50,8 +65,6 @@ struct ContentView: View {
                     
                     ZStack {
                         CameraPreview(cameraManager: cameraManager)
-                        
-                        // NEW: Grid Overlay
                         if isGridEnabled {
                             GridOverlay().stroke(Color.white.opacity(0.3), lineWidth: 1)
                         }
@@ -60,7 +73,8 @@ struct ContentView: View {
                     .clipped()
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                     .gesture(
-                        MagnificationGesture().onChanged { val in cameraManager.setZoomInstant(cameraManager.currentZoomFactor * val) }
+                        MagnificationGesture()
+                            .onChanged { val in cameraManager.setZoomInstant(cameraManager.currentZoomFactor * val) }
                     )
                 }
                 .ignoresSafeArea()
@@ -72,7 +86,7 @@ struct ContentView: View {
                 
                 // 3. UI CONTROLS
                 VStack {
-                    // Top Bar
+                    // --- TOP BAR ---
                     HStack {
                         HStack(spacing: 6) {
                             Circle().fill(locationManager.permissionGranted ? Color.green : Color.red).frame(width: 6, height: 6)
@@ -98,12 +112,10 @@ struct ContentView: View {
                     // --- SETTINGS PANEL ---
                     if showSettings {
                         VStack(spacing: 15) {
-                            // Toggles Row
                             HStack(spacing: 20) {
                                 ToggleButton(icon: "grid", label: "Grid", isOn: $isGridEnabled)
                                 ToggleButton(icon: "timer", label: "3s Timer", isOn: $isTimerEnabled)
                             }
-                            
                             // Exposure
                             HStack {
                                 Image(systemName: "sun.max.fill").font(.caption).foregroundColor(.white)
@@ -112,8 +124,7 @@ struct ContentView: View {
                                     .onChange(of: exposureValue) { _, val in cameraManager.setExposure(ev: val) }
                                 Text(String(format: "%.1f", exposureValue)).font(.caption.monospacedDigit()).foregroundColor(.white).frame(width: 30)
                             }
-                            
-                            // WB (Conditional)
+                            // WB
                             if cameraManager.isWBSupported {
                                 HStack {
                                     Image(systemName: "thermometer").font(.caption).foregroundColor(.white)
@@ -123,18 +134,24 @@ struct ContentView: View {
                                     Text("\(Int(whiteBalanceValue))K").font(.caption.monospacedDigit()).foregroundColor(.white).frame(width: 45)
                                 }
                             }
-                            
-                            // Focus (Conditional)
+                            // Focus
                             if cameraManager.isFocusSupported {
                                 HStack {
                                     Image(systemName: "flower").font(.caption).foregroundColor(.white)
-                                    Slider(value: $focusValue, in: 0.0...1.0)
-                                        .tint(.cyan)
+                                    Slider(value: $focusValue, in: 0.0...1.0).tint(.cyan)
                                         .onChange(of: focusValue) { _, val in cameraManager.setLensPosition(val) }
                                     Image(systemName: "mountain.2").font(.caption).foregroundColor(.white)
                                 }
                             }
-                            
+                            // Torch
+                            if cameraManager.isTorchSupported {
+                                HStack {
+                                    Image(systemName: "bolt.slash.fill").font(.caption).foregroundColor(.white)
+                                    Slider(value: $torchValue, in: 0.0...1.0).tint(.white)
+                                        .onChange(of: torchValue) { _, val in cameraManager.setTorchLevel(val) }
+                                    Image(systemName: "bolt.fill").font(.caption).foregroundColor(.yellow)
+                                }
+                            }
                             // Reset
                             Button("Reset All") {
                                 exposureValue = 0; whiteBalanceValue = 5500; focusValue = 0.5; torchValue = 0.0
@@ -185,20 +202,47 @@ struct ContentView: View {
                             }
                     )
                     
-                    // BOTTOM SHUTTER
+                    // --- BOTTOM BAR (Map - Shutter - Gallery) ---
                     HStack {
+                        // MAP
                         Button { showMap = true } label: {
                             Image(systemName: "map.fill").font(.title3).foregroundColor(.white).frame(width: 44, height: 44).background(.ultraThinMaterial).clipShape(Circle())
                         }
+                        
                         Spacer()
+                        
+                        // SHUTTER
                         Button { takePhoto() } label: {
                             ZStack {
                                 Circle().stroke(.white, lineWidth: 4).frame(width: 72, height: 72)
                                 Circle().fill(.white).frame(width: 62, height: 62).scaleEffect(isCapturing ? 0.85 : 1.0)
                             }
                         }
+                        
                         Spacer()
-                        Color.clear.frame(width: 44, height: 44)
+                        
+                        // GALLERY BUTTON
+                        Button {
+                            // Open even if capturedImage is nil (to see old photos)
+                            showPhotoReview = true
+                        } label: {
+                            if let image = cameraManager.capturedImage {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 44, height: 44)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white, lineWidth: 2))
+                                    .scaleEffect(thumbnailScale)
+                            } else {
+                                Image(systemName: "photo.stack")
+                                    .font(.title3)
+                                    .foregroundColor(.white)
+                                    .frame(width: 44, height: 44)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
                     }
                     .padding(.horizontal, 40).padding(.bottom, 40)
                 }
@@ -206,7 +250,6 @@ struct ContentView: View {
                 // --- FULL SCREEN OVERLAYS ---
                 if showFlashAnimation { Color.white.ignoresSafeArea().transition(.opacity).zIndex(100) }
                 
-                // NEW: Timer Countdown Overlay
                 if cameraManager.isTimerRunning {
                     Color.black.opacity(0.4).ignoresSafeArea()
                     Text("\(cameraManager.timerCount)")
@@ -219,9 +262,19 @@ struct ContentView: View {
             .navigationDestination(isPresented: $showMap) {
                 MapScreen(locationManager: locationManager, landmark: targetLandmarkBinding)
             }
+            // CHANGED: No arguments here. PhotoReviewView handles fetching itself.
+            .sheet(isPresented: $showPhotoReview) {
+                PhotoReviewView()
+            }
             .onReceive(locationManager.$heading) { _ in updateNavigationLogic() }
             .onReceive(locationManager.$location) { _ in updateNavigationLogic() }
-            .onReceive(cameraManager.captureDidFinish) { _ in isCapturing = false }
+            .onReceive(cameraManager.captureDidFinish) { _ in
+                withAnimation(.easeInOut(duration: 0.1)) { isCapturing = false }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) { thumbnailScale = 1.2 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    withAnimation { thumbnailScale = 1.0 }
+                }
+            }
         }
     }
     
@@ -235,12 +288,10 @@ struct ContentView: View {
     }
     func takePhoto() {
         if !isTimerEnabled {
-            // Instant Flash
             isCapturing = true
             withAnimation(.easeOut(duration: 0.1)) { showFlashAnimation = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { withAnimation { showFlashAnimation = false } }
         }
-        
         cameraManager.capturePhoto(location: locationManager.location, aspectRatioValue: currentAspectRatio.value, useTimer: isTimerEnabled)
     }
     func updateNavigationLogic() {
@@ -251,7 +302,7 @@ struct ContentView: View {
     }
 }
 
-// Subviews
+// --- 3. Helper Views ---
 struct ZoomBubble: View {
     let label: String; let isSelected: Bool
     var body: some View {
@@ -280,14 +331,11 @@ struct ToggleButton: View {
     }
 }
 
-// 3x3 Grid Shape
 struct GridOverlay: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        // Vertical lines
         path.move(to: CGPoint(x: rect.width / 3, y: 0)); path.addLine(to: CGPoint(x: rect.width / 3, y: rect.height))
         path.move(to: CGPoint(x: 2 * rect.width / 3, y: 0)); path.addLine(to: CGPoint(x: 2 * rect.width / 3, y: rect.height))
-        // Horizontal lines
         path.move(to: CGPoint(x: 0, y: rect.height / 3)); path.addLine(to: CGPoint(x: rect.width, y: rect.height / 3))
         path.move(to: CGPoint(x: 0, y: 2 * rect.height / 3)); path.addLine(to: CGPoint(x: rect.width, y: 2 * rect.height / 3))
         return path
