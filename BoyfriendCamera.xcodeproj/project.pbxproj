@@ -33,6 +33,7 @@
 		EA4ACAA12EF7727A006DF6AB /* Exceptions for "BoyfriendCamera" folder in "BoyfriendCameraTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ArcZoomDial.swift,
 				ZoomDialView.swift,
 			);
 			target = EA9331662ECEB77100AD97A9 /* BoyfriendCameraTests */;
@@ -40,6 +41,7 @@
 		EA4ACAA22EF7727A006DF6AB /* Exceptions for "BoyfriendCamera" folder in "BoyfriendCameraUITests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ArcZoomDial.swift,
 				ZoomDialView.swift,
 			);
 			target = EA9331702ECEB77100AD97A9 /* BoyfriendCameraUITests */;

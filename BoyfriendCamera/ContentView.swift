@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreLocation
 
+// --- 1. Define Enum OUTSIDE the struct ---
 enum AspectRatio: String, CaseIterable {
     case fourThree = "4:3"
     case sixteenNine = "16:9"
@@ -15,6 +16,7 @@ enum AspectRatio: String, CaseIterable {
     }
 }
 
+// --- 2. Define Struct AFTER the enum ---
 struct ContentView: View {
     @StateObject var cameraManager = CameraManager()
     @StateObject var locationManager = LocationManager()
@@ -26,9 +28,11 @@ struct ContentView: View {
     @State private var isCapturing = false
     @State private var isZoomDialVisible = false
     
+    // This variable now correctly sees the 'AspectRatio' type defined above
     @State private var currentAspectRatio: AspectRatio = .fourThree
     
     @State var targetLandmark = Landmark(name: "The Campanile", coordinate: CLLocationCoordinate2D(latitude: 37.8720, longitude: -122.2578))
+    
     var targetLandmarkBinding: Binding<MapLandmark> {
         Binding(get: { MapLandmark(name: targetLandmark.name, coordinate: targetLandmark.coordinate) }, set: { new in targetLandmark = Landmark(name: new.name, coordinate: new.coordinate) })
     }
@@ -69,7 +73,9 @@ struct ContentView: View {
                             Text(locationManager.permissionGranted ? "GPS" : "NO GPS").font(.system(size: 10, weight: .bold)).foregroundColor(.white)
                         }
                         .padding(.horizontal, 8).padding(.vertical, 4).background(Color.black.opacity(0.4)).cornerRadius(12)
+                        
                         Spacer()
+                        
                         Button { toggleAspectRatio() } label: {
                             Text(currentAspectRatio.rawValue).font(.footnote.bold()).foregroundColor(.white).padding(8).background(.ultraThinMaterial).clipShape(Capsule())
                         }
@@ -83,39 +89,47 @@ struct ContentView: View {
                     }
                     
                     // --- ZOOM CONTROLS ---
-                    VStack(spacing: 0) {
+                    ZStack(alignment: .bottom) {
+                        // The Dial
                         if isZoomDialVisible {
-                            Slider(value: Binding(get: { cameraManager.currentZoomFactor }, set: { cameraManager.setZoom($0) }), in: cameraManager.minZoomFactor...cameraManager.maxZoomFactor)
-                                .tint(.yellow)
-                                .padding(.horizontal, 40)
-                                .background(Capsule().fill(Color.black.opacity(0.4)).frame(height: 24))
-                                .padding(.bottom, 10)
+                            ArcZoomDial(
+                                currentZoom: Binding(get: { cameraManager.currentZoomFactor }, set: { cameraManager.setZoom($0) }),
+                                minZoom: cameraManager.minZoomFactor,
+                                maxZoom: cameraManager.maxZoomFactor,
+                                presets: cameraManager.zoomButtons
+                            )
+                            .transition(.opacity)
+                            .zIndex(1)
                         }
                         
-                        // FIXED: Render exactly what is in the zoomButtons array
-                        HStack(spacing: 20) {
-                            ForEach(cameraManager.zoomButtons, id: \.self) { preset in
-                                Button {
-                                    withAnimation { cameraManager.setZoom(preset) }
-                                } label: {
-                                    ZStack {
-                                        Circle().fill(Color.black.opacity(0.5))
-                                        if abs(cameraManager.currentZoomFactor - preset) < 0.1 { Circle().stroke(.yellow, lineWidth: 1) }
-                                        
-                                        // LABEL LOGIC: 0.5 -> ".5", 1.0 -> "1", 2.0 -> "2"
-                                        Text(preset == 0.5 ? ".5" : String(format: "%.0f", preset))
-                                            .font(.system(size: 12, weight: .bold))
-                                            .foregroundColor(abs(cameraManager.currentZoomFactor - preset) < 0.1 ? .yellow : .white)
+                        // The Buttons
+                        if !isZoomDialVisible {
+                            HStack(spacing: 20) {
+                                ForEach(cameraManager.zoomButtons, id: \.self) { preset in
+                                    Button {
+                                        withAnimation { cameraManager.setZoom(preset) }
+                                    } label: {
+                                        ZStack {
+                                            Circle().fill(Color.black.opacity(0.5))
+                                            if abs(cameraManager.currentZoomFactor - preset) < 0.1 { Circle().stroke(.yellow, lineWidth: 1) }
+                                            
+                                            // Label Logic: .5 for 0.5, 1 for 1.0
+                                            Text(preset == 0.5 ? ".5" : String(format: "%.0f", preset))
+                                                .font(.system(size: 12, weight: .bold))
+                                                .foregroundColor(abs(cameraManager.currentZoomFactor - preset) < 0.1 ? .yellow : .white)
+                                        }
+                                        .frame(width: 38, height: 38)
                                     }
-                                    .frame(width: 38, height: 38)
+                                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.2).onEnded { _ in withAnimation { isZoomDialVisible = true } })
                                 }
-                                .simultaneousGesture(LongPressGesture().onEnded { _ in withAnimation { isZoomDialVisible = true } })
                             }
+                            .padding(.bottom, 20)
+                            .transition(.opacity)
+                            .zIndex(2)
                         }
-                        .padding(.bottom, 20)
                     }
                     
-                    // BOTTOM SHUTTER
+                    // Shutter
                     HStack {
                         Button { showMap = true } label: {
                             Image(systemName: "map.fill").font(.title3).foregroundColor(.white).frame(width: 44, height: 44).background(.ultraThinMaterial).clipShape(Circle())
@@ -147,6 +161,7 @@ struct ContentView: View {
         }
     }
     
+    // Actions
     func toggleAspectRatio() {
         let allCases = AspectRatio.allCases
         if let currentIndex = allCases.firstIndex(of: currentAspectRatio) {
@@ -154,14 +169,12 @@ struct ContentView: View {
             currentAspectRatio = allCases[nextIndex]
         }
     }
-    
     func takePhoto() {
         isCapturing = true
         withAnimation(.easeOut(duration: 0.1)) { showFlashAnimation = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { withAnimation { showFlashAnimation = false } }
         cameraManager.capturePhoto(location: locationManager.location, aspectRatioValue: currentAspectRatio.value)
     }
-    
     func updateNavigationLogic() {
         guard let userLoc = locationManager.location, let rawHeading = locationManager.heading?.trueHeading else { return }
         let smooth = smoother.smooth(rawHeading)

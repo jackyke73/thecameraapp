@@ -16,12 +16,13 @@ class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
     @Published var maxZoomFactor: CGFloat = 15.0
     @Published var currentZoomFactor: CGFloat = 1.0
     
-    // FIXED: Hardcoded buttons exactly as you requested
-    @Published var zoomButtons: [CGFloat] = [0.5, 1.0, 2.0, 4.0]
+    // FORCED BUTTON LAYOUT
+    @Published var zoomButtons: [CGFloat] = [0.5, 1.0, 2.0, 4.0, 8.0]
 
-    // SCALER: This performs the "Divide by 2" logic in reverse.
-    // UI says 0.5 -> We tell camera "Go to Native 1.0"
-    // UI says 1.0 -> We tell camera "Go to Native 2.0"
+    // SCALER: On Pro iPhones, Native 1.0 is the UltraWide.
+    // So we must multiply UI Zoom by 2 to get Native Zoom.
+    // UI 0.5 * 2 = Native 1.0 (Ultra)
+    // UI 1.0 * 2 = Native 2.0 (Wide)
     private var zoomScaler: CGFloat = 2.0
 
     let session = AVCaptureSession()
@@ -43,21 +44,19 @@ class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
         checkPermissions()
     }
 
-    // MARK: - ZOOM LOGIC
+    // MARK: - ZOOM LOGIC (Precision Mode)
     
     func setZoom(_ uiFactor: CGFloat) {
         sessionQueue.async {
             guard let device = self.activeDevice else { return }
             
-            // MATH: UI 0.5 * 2.0 = Native 1.0 (Ultra Wide)
+            // MATH: UI 1.0 -> Native 2.0
             let nativeFactor = uiFactor * self.zoomScaler
             
             do {
                 try device.lockForConfiguration()
-                let lower = device.minAvailableVideoZoomFactor
-                let upper = device.maxAvailableVideoZoomFactor
-                let clamped = max(lower, min(nativeFactor, upper))
-                
+                // Clamp to safe limits
+                let clamped = max(device.minAvailableVideoZoomFactor, min(nativeFactor, device.maxAvailableVideoZoomFactor))
                 device.ramp(toVideoZoomFactor: clamped, withRate: 5.0)
                 device.unlockForConfiguration()
                 
@@ -143,26 +142,28 @@ class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
         }
     }
 
-    // MARK: - HARDWARE SETUP
+    // MARK: - HARDWARE SETUP (Forced 0.5x Base)
 
     private func setupCamera() {
         session.beginConfiguration()
         session.sessionPreset = .photo
         
-        // 1. Force Triple/DualWide to ensure we have the 0.5x lens
+        // 1. FORCE TRIPLE CAMERA (The one with 0.5x base)
         let deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInTripleCamera, .builtInDualWideCamera]
         guard let device = AVCaptureDevice.DiscoverySession(deviceTypes: deviceTypes, mediaType: .video, position: .back).devices.first else {
-            setupStandardCamera() // Fallback if no Pro camera found
+            // Fallback for single lens phones (Scaling 1:1)
+            setupStandardCamera()
             return
         }
         self.activeDevice = device
         
-        // 2. FORCE SCALER TO 2.0
+        // 2. SET SCALER TO 2.0
+        // Because Native 1.0 is UltraWide, we need UI 1.0 to be Native 2.0
         self.zoomScaler = 2.0
         
         // 3. FORCE BUTTONS (Double check they are set)
         DispatchQueue.main.async {
-            self.zoomButtons = [0.5, 1.0, 2.0, 4.0]
+            self.zoomButtons = [0.5, 1.0, 2.0, 4.0, 8.0]
             self.minZoomFactor = 0.5
             // Max native is often ~15. 15 / 2 = 7.5x UI max.
             self.maxZoomFactor = device.maxAvailableVideoZoomFactor / self.zoomScaler
@@ -187,11 +188,12 @@ class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleB
         }
     }
     
+    // Fallback for non-Pro phones
     private func setupStandardCamera() {
         guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { return }
         self.activeDevice = device
-        self.zoomScaler = 1.0
-        DispatchQueue.main.async { self.zoomButtons = [1.0, 2.0] } // Basic options
+        self.zoomScaler = 1.0 // 1:1 mapping
+        self.zoomButtons = [1.0, 2.0] // Simplified buttons
         
         do {
             let input = try AVCaptureDeviceInput(device: device)
