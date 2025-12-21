@@ -35,6 +35,7 @@
 			membershipExceptions = (
 				ArcZoomDial.swift,
 				PhotoReviewView.swift,
+				SplashScreen.swift,
 				ZoomDialView.swift,
 			);
 			target = EA9331662ECEB77100AD97A9 /* BoyfriendCameraTests */;
@@ -44,6 +45,7 @@
 			membershipExceptions = (
 				ArcZoomDial.swift,
 				PhotoReviewView.swift,
+				SplashScreen.swift,
 				ZoomDialView.swift,
 			);
 			target = EA9331702ECEB77100AD97A9 /* BoyfriendCameraUITests */;
