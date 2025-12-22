@@ -19,6 +19,9 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published var isPersonDetected = false
     @Published var capturedImage: UIImage?
 
+    // ✅ NEW: master toggle for on-device AI/Vision (for responsiveness / battery)
+    @Published var isAIFeaturesEnabled: Bool = true
+
     // Capabilities (Dynamic - updated when camera/lens changes)
     @Published var isWBSupported: Bool = false
     @Published var isFocusSupported: Bool = false
@@ -45,8 +48,8 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     // ✅ Keep session/device control work on this queue
     private let sessionQueue = DispatchQueue(label: "camera.sessionQueue")
 
-    // ✅ Move Vision/frame processing OFF sessionQueue (fixes lag / jump)
-    private let videoOutputQueue = DispatchQueue(label: "camera.videoOutputQueue", qos: .userInitiated)
+    // ✅ Vision/frame processing OFF sessionQueue (and lower QOS so UI stays responsive)
+    private let videoOutputQueue = DispatchQueue(label: "camera.videoOutputQueue", qos: .utility)
 
     private let videoOutput = AVCaptureVideoDataOutput()
     private let photoOutput = AVCapturePhotoOutput()
@@ -55,7 +58,12 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private var deviceInput: AVCaptureDeviceInput?
 
     private let bodyPoseRequest = VNDetectHumanBodyPoseRequest()
-    private var poseFrameCounter: Int = 0 // optional throttle
+    private let visionSequenceHandler = VNSequenceRequestHandler()
+
+    private var poseFrameCounter: Int = 0
+    private let poseEveryNFrames: Int = 4  // ✅ more throttle = less battery drain
+    private var isVisionBusy: Bool = false
+    private var lastDetected: Bool = false
 
     private var pendingLocation: CLLocation?
     private var pendingAspectRatio: CGFloat = 4.0 / 3.0
@@ -78,8 +86,10 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     // MARK: - Output Setup (one-time)
     private func configureOutputs() {
         videoOutput.alwaysDiscardsLateVideoFrames = true
+
+        // ✅ More efficient format for Vision (reduces conversion cost vs 32BGRA)
         videoOutput.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
         ]
     }
 
@@ -129,7 +139,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     }
 
     // MARK: - PRO SETTINGS (Crash-proof)
-
     func setExposure(ev: Float) {
         sessionQueue.async {
             guard let device = self.configurationDevice() else { return }
@@ -146,7 +155,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private func clampGains(_ gains: AVCaptureDevice.WhiteBalanceGains, for device: AVCaptureDevice) -> AVCaptureDevice.WhiteBalanceGains {
         var g = gains
         let maxG = device.maxWhiteBalanceGain
-        let safeMax = max(1.0, maxG - 0.01) // epsilon against rounding
+        let safeMax = max(1.0, maxG - 0.01)
 
         g.redGain   = max(1.0, min(g.redGain,   safeMax))
         g.greenGain = max(1.0, min(g.greenGain, safeMax))
@@ -170,7 +179,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 gains = self.clampGains(gains, for: device)
 
                 guard gains.redGain.isFinite, gains.greenGain.isFinite, gains.blueGain.isFinite else { return }
-
                 device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
             } catch {
                 print("WB error: \(error)")
@@ -234,7 +242,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     // MARK: - ZOOM
     func setZoomInstant(_ uiFactor: CGFloat) {
         sessionQueue.async {
-            guard let device = self.activeDevice else { return } // zoom uses virtual device
+            guard let device = self.activeDevice else { return }
             let nativeFactor = uiFactor * self.zoomScaler
             do {
                 try device.lockForConfiguration()
@@ -246,8 +254,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             } catch { }
 
             DispatchQueue.main.async { self.currentZoomFactor = uiFactor }
-
-            // Zoom may trigger lens switching -> refresh capabilities
             self.refreshCapabilities()
         }
     }
@@ -309,7 +315,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
         var fixedImage = fixOrientation(img: originalImage)
 
-        // Mirror selfie
         if currentPosition == .front, let cgImage = fixedImage.cgImage {
             fixedImage = UIImage(cgImage: cgImage, scale: fixedImage.scale, orientation: .upMirrored)
             fixedImage = fixOrientation(img: fixedImage)
@@ -493,21 +498,36 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    // MARK: - Vision body pose (runs on videoOutputQueue now)
+    // MARK: - Vision body pose (throttled + single-flight)
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
 
-        // Optional throttle: run once every 2 frames (keeps it snappy)
+        guard isAIFeaturesEnabled else { return }
+
         poseFrameCounter += 1
-        if poseFrameCounter % 2 != 0 { return }
+        if poseFrameCounter % poseEveryNFrames != 0 { return }
+
+        // ✅ prevent piling up work (keeps UI responsive)
+        if isVisionBusy { return }
+        isVisionBusy = true
+        defer { isVisionBusy = false }
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .right, options: [:])
-        try? handler.perform([bodyPoseRequest])
 
-        DispatchQueue.main.async {
-            self.isPersonDetected = (self.bodyPoseRequest.results?.first != nil)
+        autoreleasepool {
+            do {
+                try visionSequenceHandler.perform([bodyPoseRequest], on: pixelBuffer, orientation: .right)
+                let detected = (bodyPoseRequest.results?.first != nil)
+
+                // ✅ only publish if it changed
+                if detected != lastDetected {
+                    lastDetected = detected
+                    DispatchQueue.main.async { self.isPersonDetected = detected }
+                }
+            } catch {
+                // ignore
+            }
         }
     }
 
@@ -535,7 +555,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    // Convenience: tap point in layer coords
     func setFocus(layerPoint: CGPoint, previewLayer: AVCaptureVideoPreviewLayer) {
         let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: layerPoint)
         setFocus(point: devicePoint)

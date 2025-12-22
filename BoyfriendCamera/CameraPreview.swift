@@ -1,8 +1,3 @@
-//
-//  CameraPreview.swift
-//  BoyfriendCamera
-//
-
 import SwiftUI
 import AVFoundation
 import UIKit
@@ -10,86 +5,57 @@ import UIKit
 struct CameraPreview: UIViewRepresentable {
     @ObservedObject var cameraManager: CameraManager
 
+    // ✅ NEW: notify SwiftUI that user tapped the viewfinder
+    var onUserInteraction: (() -> Void)? = nil
+
     func makeUIView(context: Context) -> CameraPreviewView {
         let view = CameraPreviewView()
         view.session = cameraManager.session
 
         // Tap Gesture
-        let tap = UITapGestureRecognizer(target: context.coordinator,
-                                         action: #selector(Coordinator.handleTap(_:)))
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         view.addGestureRecognizer(tap)
-
-        // Initial connection sync (orientation + mirroring)
-        if let conn = view.videoPreviewLayer.connection, conn.isVideoOrientationSupported {
-            conn.videoOrientation = .portrait
-        }
-        if let conn = view.videoPreviewLayer.connection, conn.isVideoMirroringSupported {
-            conn.automaticallyAdjustsVideoMirroring = false
-            conn.isVideoMirrored = (cameraManager.currentPosition == .front)
-        }
 
         return view
     }
 
-    func updateUIView(_ uiView: CameraPreviewView, context: Context) {
-        // Keep session attached
-        if uiView.session !== cameraManager.session {
-            uiView.session = cameraManager.session
-        }
-
-        // Keep orientation + mirroring in sync with camera position
-        if let conn = uiView.videoPreviewLayer.connection {
-            if conn.isVideoOrientationSupported {
-                conn.videoOrientation = .portrait
-            }
-            if conn.isVideoMirroringSupported {
-                conn.automaticallyAdjustsVideoMirroring = false
-                conn.isVideoMirrored = (cameraManager.currentPosition == .front)
-            }
-        }
-
-        // Ensure the layer stays sized correctly
-        uiView.videoPreviewLayer.frame = uiView.bounds
-        uiView.videoPreviewLayer.videoGravity = .resizeAspectFill
-    }
+    func updateUIView(_ uiView: CameraPreviewView, context: Context) {}
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    final class Coordinator: NSObject {
+    class Coordinator: NSObject {
         var parent: CameraPreview
         init(_ parent: CameraPreview) { self.parent = parent }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            // ✅ reveal hidden controls like Apple Camera does
+            parent.onUserInteraction?()
+
             guard let view = gesture.view as? CameraPreviewView else { return }
             let point = gesture.location(in: view)
 
             // 1) Visual feedback
             view.showFocusBox(at: point)
 
-            // 2) Convert + focus (USE PREVIEW LAYER CONVERSION)
-            // This keeps tap-to-focus correct even with mirroring / aspect fill.
-            parent.cameraManager.setFocus(layerPoint: point, previewLayer: view.videoPreviewLayer)
+            // 2) Convert & Focus
+            let capturePoint = view.videoPreviewLayer.captureDevicePointConverted(fromLayerPoint: point)
+            parent.cameraManager.setFocus(point: capturePoint)
 
-            // 3) Haptic
+            // Haptic
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
     }
 }
 
-final class CameraPreviewView: UIView {
-
-    var videoPreviewLayer: AVCaptureVideoPreviewLayer {
-        return layer as! AVCaptureVideoPreviewLayer
-    }
+class CameraPreviewView: UIView {
+    var videoPreviewLayer: AVCaptureVideoPreviewLayer { return layer as! AVCaptureVideoPreviewLayer }
 
     var session: AVCaptureSession? {
-        get { videoPreviewLayer.session }
+        get { return videoPreviewLayer.session }
         set { videoPreviewLayer.session = newValue }
     }
 
-    override class var layerClass: AnyClass {
-        return AVCaptureVideoPreviewLayer.self
-    }
+    override class var layerClass: AnyClass { return AVCaptureVideoPreviewLayer.self }
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -108,7 +74,6 @@ final class CameraPreviewView: UIView {
 
         addSubview(box)
 
-        // Animate: Scale down + Fade In -> Fade Out
         box.transform = CGAffineTransform(scaleX: 1.5, y: 1.5)
         box.alpha = 1.0
 
