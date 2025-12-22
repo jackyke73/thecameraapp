@@ -16,11 +16,14 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     // MARK: - Published State
     @Published var permissionGranted = false
-    @Published var isPersonDetected = false
-    @Published var capturedImage: UIImage?
 
-    // ✅ NEW: master toggle for on-device AI/Vision (for responsiveness / battery)
+    // ✅ AI / Detection state
     @Published var isAIFeaturesEnabled: Bool = true
+    @Published var isPersonDetected = false
+    @Published var peopleCount: Int = 0
+    @Published var expressions: [String] = []   // one per detected face (if any)
+
+    @Published var capturedImage: UIImage?
 
     // Capabilities (Dynamic - updated when camera/lens changes)
     @Published var isWBSupported: Bool = false
@@ -45,10 +48,10 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     let session = AVCaptureSession()
 
-    // ✅ Keep session/device control work on this queue
+    // Session/device control queue
     private let sessionQueue = DispatchQueue(label: "camera.sessionQueue")
 
-    // ✅ Vision/frame processing OFF sessionQueue (and lower QOS so UI stays responsive)
+    // Vision/frame processing queue (keep UI responsive)
     private let videoOutputQueue = DispatchQueue(label: "camera.videoOutputQueue", qos: .utility)
 
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -57,13 +60,19 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private var activeDevice: AVCaptureDevice?
     private var deviceInput: AVCaptureDeviceInput?
 
-    private let bodyPoseRequest = VNDetectHumanBodyPoseRequest()
-    private let visionSequenceHandler = VNSequenceRequestHandler()
+    // ✅ Vision
+    private let poseRequest = VNDetectHumanBodyPoseRequest()
+    private let faceLandmarksRequest = VNDetectFaceLandmarksRequest()
+    private let visionHandler = VNSequenceRequestHandler()
 
-    private var poseFrameCounter: Int = 0
-    private let poseEveryNFrames: Int = 4  // ✅ more throttle = less battery drain
+    private var frameCounter: Int = 0
+    private let processEveryNFrames: Int = 6   // ✅ raise this if you want more battery savings
     private var isVisionBusy: Bool = false
-    private var lastDetected: Bool = false
+
+    // For “only publish if changed” (reduces SwiftUI churn)
+    private var lastPeopleCount: Int = -1
+    private var lastPersonDetected: Bool = false
+    private var lastExpressions: [String] = []
 
     private var pendingLocation: CLLocation?
     private var pendingAspectRatio: CGFloat = 4.0 / 3.0
@@ -87,7 +96,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private func configureOutputs() {
         videoOutput.alwaysDiscardsLateVideoFrames = true
 
-        // ✅ More efficient format for Vision (reduces conversion cost vs 32BGRA)
+        // ✅ Efficient format for Vision
         videoOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
         ]
@@ -452,7 +461,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             session.addOutput(photoOutput)
         }
 
-        // ✅ Vision work on videoOutputQueue (NOT sessionQueue)
         videoOutput.setSampleBufferDelegate(self, queue: videoOutputQueue)
 
         if let conn = videoOutput.connection(with: .video) {
@@ -498,17 +506,16 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    // MARK: - Vision body pose (throttled + single-flight)
+    // MARK: - Vision (AI)
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
 
         guard isAIFeaturesEnabled else { return }
 
-        poseFrameCounter += 1
-        if poseFrameCounter % poseEveryNFrames != 0 { return }
+        frameCounter += 1
+        if frameCounter % processEveryNFrames != 0 { return }
 
-        // ✅ prevent piling up work (keeps UI responsive)
         if isVisionBusy { return }
         isVisionBusy = true
         defer { isVisionBusy = false }
@@ -517,18 +524,77 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
         autoreleasepool {
             do {
-                try visionSequenceHandler.perform([bodyPoseRequest], on: pixelBuffer, orientation: .right)
-                let detected = (bodyPoseRequest.results?.first != nil)
+                // ✅ run both in one pass
+                try visionHandler.perform([poseRequest, faceLandmarksRequest], on: pixelBuffer, orientation: .right)
 
-                // ✅ only publish if it changed
-                if detected != lastDetected {
-                    lastDetected = detected
-                    DispatchQueue.main.async { self.isPersonDetected = detected }
+                let poseCount = poseRequest.results?.count ?? 0
+                let faces = (faceLandmarksRequest.results as? [VNFaceObservation]) ?? []
+                let faceCount = faces.count
+
+                // expressions from faces
+                let exprs = faces.map { classifyExpression(face: $0) }
+
+                // peopleCount = prefer face count (multiple faces), fallback to pose count
+                let newPeopleCount = max(faceCount, poseCount)
+                let newDetected = (newPeopleCount > 0)
+
+                // ✅ only publish when values changed
+                var shouldPublish = false
+                if newPeopleCount != lastPeopleCount { lastPeopleCount = newPeopleCount; shouldPublish = true }
+                if newDetected != lastPersonDetected { lastPersonDetected = newDetected; shouldPublish = true }
+                if exprs != lastExpressions { lastExpressions = exprs; shouldPublish = true }
+
+                if shouldPublish {
+                    DispatchQueue.main.async {
+                        self.peopleCount = newPeopleCount
+                        self.isPersonDetected = newDetected
+                        self.expressions = exprs
+                    }
                 }
             } catch {
                 // ignore
             }
         }
+    }
+
+    // ✅ Simple heuristic expression classifier from mouth landmarks
+    private func classifyExpression(face: VNFaceObservation) -> String {
+        guard
+            let lm = face.landmarks,
+            let outer = lm.outerLips?.normalizedPoints,
+            outer.count >= 6
+        else { return "Unknown" }
+
+        // mouth width
+        let left = outer.min(by: { $0.x < $1.x })!
+        let right = outer.max(by: { $0.x < $1.x })!
+        let width = distance(left, right)
+
+        // mouth openness (height)
+        let minY = outer.map(\.y).min() ?? 0
+        let maxY = outer.map(\.y).max() ?? 0
+        let height = max(0, maxY - minY)
+
+        if width <= 0.0001 { return "Unknown" }
+
+        let openness = height / width
+
+        // smile score: corners higher than center
+        let centerY = outer.sorted(by: { $0.x < $1.x })[outer.count / 2].y
+        let cornersAvgY = (left.y + right.y) / 2.0
+        let smileScore = cornersAvgY - centerY
+
+        // thresholds tuned for “good enough” UI indicator
+        if openness > 0.30 { return "Surprised" }
+        if smileScore > 0.03 { return "Smiling" }
+        if openness < 0.08 { return "Neutral" }
+        return "Talking"
+    }
+
+    private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let dx = a.x - b.x
+        let dy = a.y - b.y
+        return sqrt(dx*dx + dy*dy)
     }
 
     // MARK: - Focus Tap (Normalized point)

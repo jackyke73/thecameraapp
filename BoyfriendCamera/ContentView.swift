@@ -2,11 +2,13 @@ import SwiftUI
 import CoreLocation
 import AVFoundation
 
+// --- 1. Enum ---
 enum AspectRatio: String, CaseIterable {
     case fourThree = "4:3"
     case sixteenNine = "16:9"
     case square = "1:1"
 
+    // Target Height / Width ratio
     var value: CGFloat {
         switch self {
         case .fourThree: return 4.0 / 3.0
@@ -16,6 +18,7 @@ enum AspectRatio: String, CaseIterable {
     }
 }
 
+// --- 2. Main View ---
 struct ContentView: View {
     @StateObject var cameraManager = CameraManager()
     @StateObject var locationManager = LocationManager()
@@ -27,22 +30,14 @@ struct ContentView: View {
     @State private var isCapturing = false
     @State private var isZoomDialVisible = false
 
-    // Landmark lock
-    @State private var isLockEnabled: Bool = true
-
-    // ✅ Apple-ish: lock control hidden until user taps viewfinder
-    @State private var showLockControl: Bool = false
-    @State private var lockHideWorkItem: DispatchWorkItem?
-
-    // ✅ Toast when toggled
-    @State private var showLockToast: Bool = false
-    @State private var lockToastText: String = ""
-
+    // Default Aspect Ratio
     @State private var currentAspectRatio: AspectRatio = .fourThree
 
+    // Gallery & Thumbnail States
     @State private var showPhotoReview = false
     @State private var thumbnailScale: CGFloat = 1.0
 
+    // SETTINGS STATES
     @State private var showSettings = false
     @State private var exposureValue: Float = 0.0
     @State private var whiteBalanceValue: Float = 5500.0
@@ -51,6 +46,13 @@ struct ContentView: View {
 
     @State private var isGridEnabled = false
     @State private var isTimerEnabled = false
+
+    // ✅ NEW: Landmark lock toggle (your “auto lock to target” feature)
+    @State private var isLandmarkLockEnabled = true
+
+    // ✅ Throttle landmark guidance updates so UI stays responsive
+    @State private var lastNavUpdateTime: Date = .distantPast
+    private let navUpdateMinInterval: TimeInterval = 0.12
 
     @State var targetLandmark = Landmark(
         name: "The Campanile",
@@ -66,32 +68,28 @@ struct ContentView: View {
 
     @State private var startZoomValue: CGFloat = 1.0
 
-    // ✅ throttle landmark guidance updates (prevents UI jank)
-    @State private var lastNavUpdateTime: TimeInterval = 0
-    private let navMinInterval: TimeInterval = 0.12
-
     var body: some View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                // CAMERA
+                // 1) CAMERA CONTAINER
                 GeometryReader { geo in
                     let width = geo.size.width
+
                     let sensorRatio: CGFloat = 4.0 / 3.0
                     let sensorHeight = width * sensorRatio
                     let targetHeight = width * currentAspectRatio.value
+
+                    // Scaling Logic
                     let scaleFactor: CGFloat = currentAspectRatio.value > sensorRatio
                     ? (currentAspectRatio.value / sensorRatio)
                     : 1.0
 
                     ZStack {
-                        CameraPreview(
-                            cameraManager: cameraManager,
-                            onUserInteraction: { revealLockControlTemporarily() }
-                        )
-                        .frame(width: width, height: sensorHeight)
-                        .scaleEffect(scaleFactor)
+                        CameraPreview(cameraManager: cameraManager)
+                            .frame(width: width, height: sensorHeight)
+                            .scaleEffect(scaleFactor)
 
                         if isGridEnabled {
                             GridOverlay()
@@ -105,134 +103,120 @@ struct ContentView: View {
                     .gesture(
                         MagnificationGesture()
                             .onChanged { val in
+                                // Disable pinch zoom for front
                                 guard cameraManager.currentPosition == .back else { return }
-                                revealLockControlTemporarily()
                                 cameraManager.setZoomInstant(cameraManager.currentZoomFactor * val)
                             }
                     )
                 }
                 .ignoresSafeArea()
 
-                // OVERLAYS (only when lock enabled)
-                if isLockEnabled, let advice = currentAdvice {
-                    FloatingTargetView(angleDiff: advice.turnAngle, isLocked: abs(advice.turnAngle) < 3)
-                }
-
-                // ✅ Toast indicator (Apple-ish)
-                if showLockToast {
-                    Text(lockToastText)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.yellow)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.55))
-                        .clipShape(Capsule())
-                        .padding(.top, 60)
-                        .transition(.opacity)
-                        .zIndex(999)
-                }
-
-                // UI
+                // ✅ 2) AI HUD (corner display)
                 VStack {
-                    // TOP BAR
                     HStack {
-                        HStack(spacing: 8) {
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(locationManager.permissionGranted ? Color.green : Color.red)
-                                    .frame(width: 6, height: 6)
-                                Text(locationManager.permissionGranted ? "GPS" : "NO GPS")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.black.opacity(0.4))
-                            .cornerRadius(12)
+                        AIDebugHUD(cameraManager: cameraManager)
+                            .padding(.leading, 14)
+                            .padding(.top, 80)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .zIndex(500)
 
-                            // Map moved to top (bottom now Apple style)
-                            Button {
-                                revealLockControlTemporarily()
-                                showMap = true
-                            } label: {
-                                Image(systemName: "map.fill")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white)
-                                    .frame(width: 32, height: 32)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Circle())
-                            }
+                // 3) LANDMARK OVERLAYS (only when lock enabled)
+                if isLandmarkLockEnabled, let advice = currentAdvice {
+                    FloatingTargetView(angleDiff: advice.turnAngle, isLocked: abs(advice.turnAngle) < 3)
+                        .zIndex(50)
+                }
+
+                // 4) UI CONTROLS
+                VStack {
+                    // --- TOP BAR ---
+                    HStack {
+                        // Map button moved to top-left to keep bottom Apple layout clean
+                        Button { showMap = true } label: {
+                            Image(systemName: "map.fill")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding(10)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Circle())
                         }
+
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(locationManager.permissionGranted ? Color.green : Color.red)
+                                .frame(width: 6, height: 6)
+                            Text(locationManager.permissionGranted ? "GPS" : "NO GPS")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.4))
+                        .cornerRadius(12)
 
                         Spacer()
 
-                        // ✅ hidden lock button (appears after viewfinder tap)
-                        Button {
-                            revealLockControlTemporarily()
-                            toggleLandmarkLock()
-                        } label: {
-                            Image(systemName: "scope")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(isLockEnabled ? .black : .white)
-                                .frame(width: 36, height: 36)
-                                .background(isLockEnabled ? Color.yellow : Color.black.opacity(0.35))
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.white.opacity(isLockEnabled ? 0.0 : 0.35), lineWidth: 1))
-                        }
-                        .opacity(showLockControl ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.18), value: showLockControl)
-                        .allowsHitTesting(showLockControl)
-
-                        // Settings
-                        Button {
-                            revealLockControlTemporarily()
-                            withAnimation { showSettings.toggle() }
-                        } label: {
+                        // Settings Button
+                        Button { withAnimation { showSettings.toggle() } } label: {
                             Image(systemName: "slider.horizontal.3")
                                 .font(.headline)
                                 .foregroundColor(showSettings ? .yellow : .white)
-                                .padding(8)
+                                .padding(10)
                                 .background(.ultraThinMaterial)
                                 .clipShape(Circle())
                         }
 
-                        // Aspect Ratio
-                        Button {
-                            revealLockControlTemporarily()
-                            toggleAspectRatio()
-                        } label: {
+                        // Aspect Ratio Button
+                        Button { toggleAspectRatio() } label: {
                             Text(currentAspectRatio.rawValue)
                                 .font(.footnote.bold())
                                 .foregroundColor(.white)
-                                .padding(8)
+                                .padding(10)
                                 .background(.ultraThinMaterial)
                                 .clipShape(Capsule())
-                                .overlay(Capsule().stroke(Color.yellow, lineWidth: currentAspectRatio != .fourThree ? 1 : 0))
+                                .overlay(
+                                    Capsule().stroke(
+                                        Color.yellow,
+                                        lineWidth: currentAspectRatio != .fourThree ? 1 : 0
+                                    )
+                                )
                         }
                     }
                     .padding(.top, 50)
                     .padding(.horizontal)
 
-                    // SETTINGS PANEL
+                    // --- SETTINGS PANEL ---
                     if showSettings {
-                        VStack(spacing: 15) {
+                        VStack(spacing: 14) {
+                            // Toggles row 1
                             HStack(spacing: 12) {
                                 ToggleButton(icon: "grid", label: "Grid", isOn: $isGridEnabled)
                                 ToggleButton(icon: "timer", label: "3s Timer", isOn: $isTimerEnabled)
-
-                                // ✅ NEW: AI toggle (battery / responsiveness)
-                                ToggleButton(
-                                    icon: "sparkles",
-                                    label: "AI",
-                                    isOn: Binding(
-                                        get: { cameraManager.isAIFeaturesEnabled },
-                                        set: { cameraManager.isAIFeaturesEnabled = $0 }
-                                    )
-                                )
                             }
 
+                            // Toggles row 2 (NEW)
+                            HStack(spacing: 12) {
+                                ToggleButton(icon: "scope", label: "Lock", isOn: $isLandmarkLockEnabled)
+                                    .onChange(of: isLandmarkLockEnabled) { _, on in
+                                        if !on {
+                                            // stop showing guidance immediately
+                                            withAnimation { currentAdvice = nil }
+                                        } else {
+                                            // compute once immediately
+                                            updateNavigationLogic(force: true)
+                                        }
+                                    }
+
+                                ToggleButton(icon: "sparkles", label: "AI", isOn: $cameraManager.isAIFeaturesEnabled)
+                            }
+
+                            // Exposure
                             HStack {
-                                Image(systemName: "sun.max.fill").font(.caption).foregroundColor(.white)
+                                Image(systemName: "sun.max.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.white)
                                 Slider(value: $exposureValue, in: -2...2)
                                     .tint(.yellow)
                                     .onChange(of: exposureValue) { _, val in
@@ -241,12 +225,15 @@ struct ContentView: View {
                                 Text(String(format: "%.1f", exposureValue))
                                     .font(.caption.monospacedDigit())
                                     .foregroundColor(.white)
-                                    .frame(width: 30)
+                                    .frame(width: 34)
                             }
 
+                            // WB
                             if cameraManager.isWBSupported {
                                 HStack {
-                                    Image(systemName: "thermometer").font(.caption).foregroundColor(.white)
+                                    Image(systemName: "thermometer")
+                                        .font(.caption)
+                                        .foregroundColor(.white)
                                     Slider(value: $whiteBalanceValue, in: 3000...8000)
                                         .tint(.orange)
                                         .onChange(of: whiteBalanceValue) { _, val in
@@ -255,34 +242,45 @@ struct ContentView: View {
                                     Text("\(Int(whiteBalanceValue))K")
                                         .font(.caption.monospacedDigit())
                                         .foregroundColor(.white)
-                                        .frame(width: 45)
+                                        .frame(width: 55)
                                 }
                             }
 
+                            // Focus
                             if cameraManager.isFocusSupported {
                                 HStack {
-                                    Image(systemName: "flower").font(.caption).foregroundColor(.white)
+                                    Image(systemName: "flower")
+                                        .font(.caption)
+                                        .foregroundColor(.white)
                                     Slider(value: $focusValue, in: 0.0...1.0)
                                         .tint(.cyan)
                                         .onChange(of: focusValue) { _, val in
                                             cameraManager.setLensPosition(val)
                                         }
-                                    Image(systemName: "mountain.2").font(.caption).foregroundColor(.white)
+                                    Image(systemName: "mountain.2")
+                                        .font(.caption)
+                                        .foregroundColor(.white)
                                 }
                             }
 
+                            // Torch
                             if cameraManager.isTorchSupported {
                                 HStack {
-                                    Image(systemName: "bolt.slash.fill").font(.caption).foregroundColor(.white)
+                                    Image(systemName: "bolt.slash.fill")
+                                        .font(.caption)
+                                        .foregroundColor(.white)
                                     Slider(value: $torchValue, in: 0.0...1.0)
                                         .tint(.white)
                                         .onChange(of: torchValue) { _, val in
                                             cameraManager.setTorchLevel(val)
                                         }
-                                    Image(systemName: "bolt.fill").font(.caption).foregroundColor(.yellow)
+                                    Image(systemName: "bolt.fill")
+                                        .font(.caption)
+                                        .foregroundColor(.yellow)
                                 }
                             }
 
+                            // Reset
                             Button("Reset All") {
                                 exposureValue = 0
                                 whiteBalanceValue = 5500
@@ -306,12 +304,13 @@ struct ContentView: View {
 
                     Spacer()
 
-                    if isLockEnabled, let advice = currentAdvice {
+                    // Scope view only when lock enabled
+                    if isLandmarkLockEnabled, let advice = currentAdvice {
                         ScopeView(advice: advice)
                             .padding(.bottom, 10)
                     }
 
-                    // ZOOM DIAL
+                    // --- ZOOM CONTROLS (Only if multiple lenses / Back Camera) ---
                     if cameraManager.zoomButtons.count > 1 {
                         ZStack(alignment: .bottom) {
                             if isZoomDialVisible {
@@ -332,10 +331,7 @@ struct ContentView: View {
                                             label: preset == 0.5 ? ".5" : String(format: "%.0f", preset),
                                             isSelected: abs(cameraManager.currentZoomFactor - preset) < 0.1
                                         )
-                                        .onTapGesture {
-                                            revealLockControlTemporarily()
-                                            withAnimation { cameraManager.setZoomSmooth(preset) }
-                                        }
+                                        .onTapGesture { withAnimation { cameraManager.setZoomSmooth(preset) } }
                                     }
                                 }
                                 .padding(.bottom, 20)
@@ -348,15 +344,14 @@ struct ContentView: View {
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    revealLockControlTemporarily()
                                     if !isZoomDialVisible {
                                         withAnimation { isZoomDialVisible = true }
                                         startZoomValue = cameraManager.currentZoomFactor
                                     }
                                     let delta = -value.translation.width / 150.0
                                     let rawZoom = startZoomValue * pow(2, delta)
-                                    let clampedZoom = max(cameraManager.minZoomFactor, min(cameraManager.maxZoomFactor, rawZoom))
-                                    cameraManager.setZoomInstant(clampedZoom)
+                                    let clamped = max(cameraManager.minZoomFactor, min(cameraManager.maxZoomFactor, rawZoom))
+                                    cameraManager.setZoomInstant(clamped)
                                 }
                                 .onEnded { _ in
                                     startZoomValue = cameraManager.currentZoomFactor
@@ -369,75 +364,68 @@ struct ContentView: View {
                         Color.clear.frame(height: 100)
                     }
 
-                    // ✅ BOTTOM BAR (Apple style): Album - Shutter - Flip
+                    // --- BOTTOM BAR (Apple style) ---
                     HStack {
-                        // Album
-                        Button {
-                            revealLockControlTemporarily()
-                            showPhotoReview = true
-                        } label: {
+                        // ✅ Album (bottom-left)
+                        Button { showPhotoReview = true } label: {
                             if let image = cameraManager.capturedImage {
                                 Image(uiImage: image)
                                     .resizable()
                                     .scaledToFill()
                                     .frame(width: 52, height: 52)
                                     .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white, lineWidth: 2))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.white, lineWidth: 2)
+                                    )
                                     .scaleEffect(thumbnailScale)
                             } else {
-                                Image(systemName: "photo.on.rectangle")
-                                    .font(.system(size: 18, weight: .semibold))
+                                Image(systemName: "photo.stack")
+                                    .font(.title3)
                                     .foregroundColor(.white)
                                     .frame(width: 52, height: 52)
                                     .background(.ultraThinMaterial)
                                     .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
                         }
-                        .frame(width: 70)
 
                         Spacer()
 
-                        // Shutter
-                        Button {
-                            revealLockControlTemporarily()
-                            takePhoto()
-                        } label: {
+                        // ✅ Shutter (center)
+                        Button { takePhoto() } label: {
                             ZStack {
-                                Circle().stroke(.white, lineWidth: 4).frame(width: 78, height: 78)
-                                Circle().fill(.white).frame(width: 66, height: 66)
+                                Circle()
+                                    .stroke(.white, lineWidth: 4)
+                                    .frame(width: 78, height: 78)
+
+                                Circle()
+                                    .fill(.white)
+                                    .frame(width: 66, height: 66)
                                     .scaleEffect(isCapturing ? 0.85 : 1.0)
                             }
                         }
-                        .frame(width: 90)
 
                         Spacer()
 
-                        // Flip
-                        Button {
-                            revealLockControlTemporarily()
-                            cameraManager.switchCamera()
-                        } label: {
-                            Image(systemName: "arrow.triangle.2.circlepath.camera")
-                                .font(.system(size: 18, weight: .semibold))
+                        // ✅ Flip (bottom-right)
+                        Button { cameraManager.switchCamera() } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.title3)
                                 .foregroundColor(.white)
                                 .frame(width: 52, height: 52)
                                 .background(.ultraThinMaterial)
                                 .clipShape(Circle())
                         }
-                        .frame(width: 70)
                     }
-                    .padding(.horizontal, 30)
-                    .padding(.bottom, 36)
+                    .padding(.horizontal, 36)
+                    .padding(.bottom, 40)
                 }
 
-                // Flash
+                // --- FULL SCREEN OVERLAYS ---
                 if showFlashAnimation {
-                    Color.white.ignoresSafeArea()
-                        .transition(.opacity)
-                        .zIndex(100)
+                    Color.white.ignoresSafeArea().transition(.opacity).zIndex(100)
                 }
 
-                // Timer
                 if cameraManager.isTimerRunning {
                     Color.black.opacity(0.4).ignoresSafeArea()
                     Text("\(cameraManager.timerCount)")
@@ -450,62 +438,32 @@ struct ContentView: View {
             .navigationDestination(isPresented: $showMap) {
                 MapScreen(locationManager: locationManager, landmark: targetLandmarkBinding)
             }
-            .sheet(isPresented: $showPhotoReview) { PhotoReviewView() }
-
-            // ✅ only update when lock enabled + throttled
+            .sheet(isPresented: $showPhotoReview) {
+                PhotoReviewView()
+            }
             .onReceive(locationManager.$heading) { _ in
-                if isLockEnabled { updateNavigationLogicThrottled() }
+                updateNavigationLogic(force: false)
             }
             .onReceive(locationManager.$location) { _ in
-                if isLockEnabled { updateNavigationLogicThrottled() }
+                updateNavigationLogic(force: false)
             }
-
             .onReceive(cameraManager.captureDidFinish) { _ in
                 withAnimation(.easeInOut(duration: 0.1)) { isCapturing = false }
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) { thumbnailScale = 1.2 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { withAnimation { thumbnailScale = 1.0 } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    withAnimation { thumbnailScale = 1.0 }
+                }
             }
-
             .onAppear {
-                // optional: start hidden like Apple
-                showLockControl = false
+                // compute once at launch if lock enabled
+                updateNavigationLogic(force: true)
             }
-        }
-    }
-
-    // MARK: - Apple-ish hidden control behavior
-    private func revealLockControlTemporarily() {
-        lockHideWorkItem?.cancel()
-
-        withAnimation(.easeOut(duration: 0.15)) {
-            showLockControl = true
-        }
-
-        let work = DispatchWorkItem {
-            withAnimation(.easeIn(duration: 0.2)) {
-                showLockControl = false
-            }
-        }
-        lockHideWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
-    }
-
-    private func toggleLandmarkLock() {
-        isLockEnabled.toggle()
-        if !isLockEnabled { currentAdvice = nil }
-        showLockToastNow(text: isLockEnabled ? "LANDMARK LOCK ON" : "LANDMARK LOCK OFF")
-    }
-
-    private func showLockToastNow(text: String) {
-        lockToastText = text
-        withAnimation(.easeInOut(duration: 0.15)) { showLockToast = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-            withAnimation(.easeInOut(duration: 0.2)) { showLockToast = false }
         }
     }
 
     // MARK: - Actions
-    private func toggleAspectRatio() {
+
+    func toggleAspectRatio() {
         withAnimation {
             let allCases = AspectRatio.allCases
             if let currentIndex = allCases.firstIndex(of: currentAspectRatio) {
@@ -515,22 +473,32 @@ struct ContentView: View {
         }
     }
 
-    private func takePhoto() {
+    func takePhoto() {
         if !isTimerEnabled {
             isCapturing = true
             withAnimation(.easeOut(duration: 0.1)) { showFlashAnimation = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { withAnimation { showFlashAnimation = false } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation { showFlashAnimation = false }
+            }
         }
-        cameraManager.capturePhoto(location: locationManager.location, aspectRatioValue: currentAspectRatio.value, useTimer: isTimerEnabled)
+        cameraManager.capturePhoto(
+            location: locationManager.location,
+            aspectRatioValue: currentAspectRatio.value,
+            useTimer: isTimerEnabled
+        )
     }
 
-    private func updateNavigationLogicThrottled() {
-        let now = Date().timeIntervalSince1970
-        guard now - lastNavUpdateTime >= navMinInterval else { return }
-        lastNavUpdateTime = now
-
+    // ✅ Landmark guidance logic with toggle + throttle
+    func updateNavigationLogic(force: Bool) {
+        guard isLandmarkLockEnabled else { return }
         guard let userLoc = locationManager.location,
               let rawHeading = locationManager.heading?.trueHeading else { return }
+
+        let now = Date()
+        if !force, now.timeIntervalSince(lastNavUpdateTime) < navUpdateMinInterval {
+            return
+        }
+        lastNavUpdateTime = now
 
         let smooth = smoother.smooth(rawHeading)
         let advice = PhotoDirector.guideToLandmark(
@@ -538,20 +506,16 @@ struct ContentView: View {
             userLocation: userLoc.coordinate,
             target: targetLandmark
         )
-
-        // ✅ no heavy animation spam (keeps UI responsive)
-        var txn = Transaction()
-        txn.animation = nil
-        withTransaction(txn) {
-            currentAdvice = advice
-        }
+        withAnimation { currentAdvice = advice }
     }
 }
 
-// Helpers
+// MARK: - Helpers
+
 struct ZoomBubble: View {
     let label: String
     let isSelected: Bool
+
     var body: some View {
         ZStack {
             Circle().fill(Color.black.opacity(0.5))
@@ -579,7 +543,7 @@ struct ToggleButton: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(isOn ? Color.yellow : Color.black.opacity(0.5))
-            .cornerRadius(8)
+            .cornerRadius(10)
         }
     }
 }
@@ -587,10 +551,18 @@ struct ToggleButton: View {
 struct GridOverlay: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        path.move(to: CGPoint(x: rect.width/3, y: 0)); path.addLine(to: CGPoint(x: rect.width/3, y: rect.height))
-        path.move(to: CGPoint(x: 2*rect.width/3, y: 0)); path.addLine(to: CGPoint(x: 2*rect.width/3, y: rect.height))
-        path.move(to: CGPoint(x: 0, y: rect.height/3)); path.addLine(to: CGPoint(x: rect.width, y: rect.height/3))
-        path.move(to: CGPoint(x: 0, y: 2*rect.height/3)); path.addLine(to: CGPoint(x: rect.width, y: 2*rect.height/3))
+        path.move(to: CGPoint(x: rect.width / 3, y: 0))
+        path.addLine(to: CGPoint(x: rect.width / 3, y: rect.height))
+
+        path.move(to: CGPoint(x: 2 * rect.width / 3, y: 0))
+        path.addLine(to: CGPoint(x: 2 * rect.width / 3, y: rect.height))
+
+        path.move(to: CGPoint(x: 0, y: rect.height / 3))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height / 3))
+
+        path.move(to: CGPoint(x: 0, y: 2 * rect.height / 3))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height / 3 * 2))
+
         return path
     }
 }
