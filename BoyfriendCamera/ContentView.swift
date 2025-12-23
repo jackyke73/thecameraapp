@@ -66,6 +66,7 @@ struct ContentView: View {
         )
     }
 
+    // Zoom gesture start
     @State private var startZoomValue: CGFloat = 1.0
 
     var body: some View {
@@ -80,36 +81,27 @@ struct ContentView: View {
                     GeometryReader { geo in
                         let width = geo.size.width
 
-                        // Sensor is 4:3
                         let sensorRatio: CGFloat = 4.0 / 3.0
                         let sensorHeight = width * sensorRatio
                         let targetHeight = width * currentAspectRatio.value
 
-                        // If target is taller than sensor, scale up preview so it fills, then clip
+                        // Scaling Logic
                         let scaleFactor: CGFloat = currentAspectRatio.value > sensorRatio
                         ? (currentAspectRatio.value / sensorRatio)
                         : 1.0
 
                         ZStack {
                             ZStack {
-                                // ✅ Keep this signature consistent with your project
-                                CameraPreview(
-                                    cameraManager: cameraManager,
-                                    onUserInteraction: {
-                                        // optional: handle taps if needed
-                                    }
-                                )
-                                .frame(width: width, height: sensorHeight)
-                                .scaleEffect(scaleFactor)
+                                CameraPreview(cameraManager: cameraManager)
+                                    .frame(width: width, height: sensorHeight)
+                                    .scaleEffect(scaleFactor)
 
-                                // ✅ AI nose guidance overlay
+                                // ✅ AI nose guidance overlay (keeps dotted nose marker alive)
                                 GuidanceOverlay(
                                     nosePoint: cameraManager.nosePoint,
                                     targetPoint: cameraManager.targetPoint,
                                     isAligned: cameraManager.isAligned
                                 )
-                                .frame(width: width, height: sensorHeight)
-                                .scaleEffect(scaleFactor)
 
                                 if isGridEnabled {
                                     GridOverlay()
@@ -137,12 +129,13 @@ struct ContentView: View {
                     }
                     .ignoresSafeArea()
 
-                    // 2) AI HUD (floating, notch-safe; hides while Settings is open)
+                    // ✅ 2) AI HUD (floating, notch-safe; hides while Settings is open)
                     VStack {
                         HStack {
                             AIDebugHUD(cameraManager: cameraManager)
                                 .padding(.leading, 14)
-                                .padding(.top, topSafe + 92)
+                                // pulled up closer to the top
+                                .padding(.top, topSafe + 40)
                                 .opacity(showSettings ? 0 : 1)
                             Spacer()
                         }
@@ -171,7 +164,7 @@ struct ContentView: View {
                                     .clipShape(Circle())
                             }
 
-                            // GPS + AI ON/OFF
+                            // GPS + AI ON/OFF (AI toggle right below GPS)
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(spacing: 6) {
                                     Circle()
@@ -212,7 +205,7 @@ struct ContentView: View {
 
                             Spacer()
 
-                            // Settings
+                            // Settings Button (kept where it was)
                             Button { withAnimation { showSettings.toggle() } } label: {
                                 Image(systemName: "slider.horizontal.3")
                                     .font(.headline)
@@ -222,7 +215,7 @@ struct ContentView: View {
                                     .clipShape(Circle())
                             }
 
-                            // Aspect Ratio
+                            // Aspect Ratio Button (kept where it was)
                             Button { toggleAspectRatio() } label: {
                                 Text(currentAspectRatio.rawValue)
                                     .font(.footnote.bold())
@@ -238,17 +231,20 @@ struct ContentView: View {
                                     )
                             }
                         }
-                        .padding(.top, topSafe + 8)
+                        // ✅ notch-safe top padding (pulled slightly upward)
+                        .padding(.top, topSafe + 2)
                         .padding(.horizontal)
 
-                        // --- SETTINGS PANEL (Liquid Glass style) ---
+                        // --- SETTINGS PANEL (Liquid Glass) ---
                         if showSettings {
                             VStack(spacing: 14) {
+                                // Toggles row 1
                                 HStack(spacing: 12) {
                                     ToggleButton(icon: "grid", label: "Grid", isOn: $isGridEnabled)
                                     ToggleButton(icon: "timer", label: "3s Timer", isOn: $isTimerEnabled)
                                 }
 
+                                // Toggles row 2
                                 HStack(spacing: 12) {
                                     ToggleButton(icon: "scope", label: "Lock", isOn: $isLandmarkLockEnabled)
                                         .onChange(of: isLandmarkLockEnabled) { _, on in
@@ -330,6 +326,7 @@ struct ContentView: View {
                                     }
                                 }
 
+                                // Reset
                                 Button("Reset All") {
                                     exposureValue = 0
                                     whiteBalanceValue = 5500
@@ -420,8 +417,9 @@ struct ContentView: View {
                             Color.clear.frame(height: 100)
                         }
 
-                        // --- BOTTOM BAR ---
+                        // --- BOTTOM BAR (Apple style) ---
                         HStack {
+                            // Album (bottom-left)
                             Button { showPhotoReview = true } label: {
                                 if let image = cameraManager.capturedImage {
                                     Image(uiImage: image)
@@ -446,6 +444,7 @@ struct ContentView: View {
 
                             Spacer()
 
+                            // Shutter (center)
                             Button { takePhoto() } label: {
                                 ZStack {
                                     Circle()
@@ -461,6 +460,7 @@ struct ContentView: View {
 
                             Spacer()
 
+                            // Flip (bottom-right)
                             Button { cameraManager.switchCamera() } label: {
                                 Image(systemName: "arrow.triangle.2.circlepath")
                                     .font(.title3)
@@ -473,12 +473,11 @@ struct ContentView: View {
                         .padding(.horizontal, 36)
                         .padding(.bottom, 40)
                     }
+                    .ignoresSafeArea(edges: .top)
 
-                    // --- FULL SCREEN OVERLAYS ---
+                    // Full screen overlays
                     if showFlashAnimation {
-                        Color.white.ignoresSafeArea()
-                            .transition(.opacity)
-                            .zIndex(100)
+                        Color.white.ignoresSafeArea().transition(.opacity).zIndex(100)
                     }
 
                     if cameraManager.isTimerRunning {
@@ -529,8 +528,10 @@ struct ContentView: View {
     }
 
     private func takePhoto() {
+        // Always animate the shutter press
+        isCapturing = true
+
         if !isTimerEnabled {
-            isCapturing = true
             withAnimation(.easeOut(duration: 0.1)) { showFlashAnimation = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 withAnimation { showFlashAnimation = false }
@@ -544,6 +545,7 @@ struct ContentView: View {
         )
     }
 
+    // ✅ Landmark guidance logic with toggle + throttle
     private func updateNavigationLogic(force: Bool) {
         guard isLandmarkLockEnabled else { return }
         guard let userLoc = locationManager.location,
