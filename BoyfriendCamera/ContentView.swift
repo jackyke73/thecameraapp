@@ -20,11 +20,11 @@ enum AspectRatio: String, CaseIterable {
 
 // --- 2. Main View ---
 struct ContentView: View {
-    @StateObject var cameraManager = CameraManager()
-    @StateObject var locationManager = LocationManager()
-    let smoother = CompassSmoother()
+    @StateObject private var cameraManager = CameraManager()
+    @StateObject private var locationManager = LocationManager()
+    private let smoother = CompassSmoother()
 
-    @State var currentAdvice: DirectorAdvice?
+    @State private var currentAdvice: DirectorAdvice?
     @State private var showMap = false
     @State private var showFlashAnimation = false
     @State private var isCapturing = false
@@ -47,14 +47,14 @@ struct ContentView: View {
     @State private var isGridEnabled = false
     @State private var isTimerEnabled = false
 
-    // ✅ NEW: Landmark lock toggle (your “auto lock to target” feature)
+    // ✅ Landmark lock toggle
     @State private var isLandmarkLockEnabled = true
 
     // ✅ Throttle landmark guidance updates so UI stays responsive
     @State private var lastNavUpdateTime: Date = .distantPast
     private let navUpdateMinInterval: TimeInterval = 0.12
 
-    @State var targetLandmark = Landmark(
+    @State private var targetLandmark = Landmark(
         name: "The Campanile",
         coordinate: CLLocationCoordinate2D(latitude: 37.8720, longitude: -122.2578)
     )
@@ -83,13 +83,30 @@ struct ContentView: View {
 
                     // Scaling Logic
                     let scaleFactor: CGFloat = currentAspectRatio.value > sensorRatio
-                    ? (currentAspectRatio.value / sensorRatio)
-                    : 1.0
+                        ? (currentAspectRatio.value / sensorRatio)
+                        : 1.0
 
                     ZStack {
-                        CameraPreview(cameraManager: cameraManager)
-                            .frame(width: width, height: sensorHeight)
-                            .scaleEffect(scaleFactor)
+                        ZStack {
+                            // ✅ IMPORTANT:
+                            // Your current CameraPreview only has (cameraManager, onUserInteraction).
+                            // Remove onPreviewSizeChange to avoid “Extra argument … in call”.
+                            CameraPreview(
+                                cameraManager: cameraManager,
+                                onUserInteraction: {
+                                    // optional: hide/show stuff when user taps
+                                }
+                            )
+
+                            // ✅ AI nose guidance overlay
+                            GuidanceOverlay(
+                                nosePoint: cameraManager.nosePoint,
+                                targetPoint: cameraManager.targetPoint,
+                                isActive: cameraManager.isGuidanceActive
+                            )
+                        }
+                        .frame(width: width, height: sensorHeight)
+                        .scaleEffect(scaleFactor)
 
                         if isGridEnabled {
                             GridOverlay()
@@ -105,13 +122,18 @@ struct ContentView: View {
                             .onChanged { val in
                                 // Disable pinch zoom for front
                                 guard cameraManager.currentPosition == .back else { return }
-                                cameraManager.setZoomInstant(cameraManager.currentZoomFactor * val)
+                                if startZoomValue == 1.0 { startZoomValue = cameraManager.currentZoomFactor }
+                                let newZoom = startZoomValue * val
+                                cameraManager.setZoomInstant(newZoom)
+                            }
+                            .onEnded { _ in
+                                startZoomValue = 1.0
                             }
                     )
                 }
                 .ignoresSafeArea()
 
-                // ✅ 2) AI HUD (corner display)
+                // 2) AI HUD (corner display)
                 VStack {
                     HStack {
                         AIDebugHUD(cameraManager: cameraManager)
@@ -133,7 +155,6 @@ struct ContentView: View {
                 VStack {
                     // --- TOP BAR ---
                     HStack {
-                        // Map button moved to top-left to keep bottom Apple layout clean
                         Button { showMap = true } label: {
                             Image(systemName: "map.fill")
                                 .font(.headline)
@@ -158,7 +179,6 @@ struct ContentView: View {
 
                         Spacer()
 
-                        // Settings Button
                         Button { withAnimation { showSettings.toggle() } } label: {
                             Image(systemName: "slider.horizontal.3")
                                 .font(.headline)
@@ -168,7 +188,6 @@ struct ContentView: View {
                                 .clipShape(Circle())
                         }
 
-                        // Aspect Ratio Button
                         Button { toggleAspectRatio() } label: {
                             Text(currentAspectRatio.rawValue)
                                 .font(.footnote.bold())
@@ -190,21 +209,17 @@ struct ContentView: View {
                     // --- SETTINGS PANEL ---
                     if showSettings {
                         VStack(spacing: 14) {
-                            // Toggles row 1
                             HStack(spacing: 12) {
                                 ToggleButton(icon: "grid", label: "Grid", isOn: $isGridEnabled)
                                 ToggleButton(icon: "timer", label: "3s Timer", isOn: $isTimerEnabled)
                             }
 
-                            // Toggles row 2 (NEW)
                             HStack(spacing: 12) {
                                 ToggleButton(icon: "scope", label: "Lock", isOn: $isLandmarkLockEnabled)
                                     .onChange(of: isLandmarkLockEnabled) { _, on in
                                         if !on {
-                                            // stop showing guidance immediately
                                             withAnimation { currentAdvice = nil }
                                         } else {
-                                            // compute once immediately
                                             updateNavigationLogic(force: true)
                                         }
                                     }
@@ -310,7 +325,7 @@ struct ContentView: View {
                             .padding(.bottom, 10)
                     }
 
-                    // --- ZOOM CONTROLS (Only if multiple lenses / Back Camera) ---
+                    // --- ZOOM CONTROLS ---
                     if cameraManager.zoomButtons.count > 1 {
                         ZStack(alignment: .bottom) {
                             if isZoomDialVisible {
@@ -364,9 +379,8 @@ struct ContentView: View {
                         Color.clear.frame(height: 100)
                     }
 
-                    // --- BOTTOM BAR (Apple style) ---
+                    // --- BOTTOM BAR ---
                     HStack {
-                        // ✅ Album (bottom-left)
                         Button { showPhotoReview = true } label: {
                             if let image = cameraManager.capturedImage {
                                 Image(uiImage: image)
@@ -391,7 +405,6 @@ struct ContentView: View {
 
                         Spacer()
 
-                        // ✅ Shutter (center)
                         Button { takePhoto() } label: {
                             ZStack {
                                 Circle()
@@ -407,7 +420,6 @@ struct ContentView: View {
 
                         Spacer()
 
-                        // ✅ Flip (bottom-right)
                         Button { cameraManager.switchCamera() } label: {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .font(.title3)
@@ -455,7 +467,6 @@ struct ContentView: View {
                 }
             }
             .onAppear {
-                // compute once at launch if lock enabled
                 updateNavigationLogic(force: true)
             }
         }
@@ -463,7 +474,7 @@ struct ContentView: View {
 
     // MARK: - Actions
 
-    func toggleAspectRatio() {
+    private func toggleAspectRatio() {
         withAnimation {
             let allCases = AspectRatio.allCases
             if let currentIndex = allCases.firstIndex(of: currentAspectRatio) {
@@ -473,7 +484,7 @@ struct ContentView: View {
         }
     }
 
-    func takePhoto() {
+    private func takePhoto() {
         if !isTimerEnabled {
             isCapturing = true
             withAnimation(.easeOut(duration: 0.1)) { showFlashAnimation = true }
@@ -481,6 +492,7 @@ struct ContentView: View {
                 withAnimation { showFlashAnimation = false }
             }
         }
+
         cameraManager.capturePhoto(
             location: locationManager.location,
             aspectRatioValue: currentAspectRatio.value,
@@ -489,7 +501,7 @@ struct ContentView: View {
     }
 
     // ✅ Landmark guidance logic with toggle + throttle
-    func updateNavigationLogic(force: Bool) {
+    private func updateNavigationLogic(force: Bool) {
         guard isLandmarkLockEnabled else { return }
         guard let userLoc = locationManager.location,
               let rawHeading = locationManager.heading?.trueHeading else { return }
@@ -551,6 +563,7 @@ struct ToggleButton: View {
 struct GridOverlay: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
+
         path.move(to: CGPoint(x: rect.width / 3, y: 0))
         path.addLine(to: CGPoint(x: rect.width / 3, y: rect.height))
 
@@ -561,7 +574,7 @@ struct GridOverlay: Shape {
         path.addLine(to: CGPoint(x: rect.width, y: rect.height / 3))
 
         path.move(to: CGPoint(x: 0, y: 2 * rect.height / 3))
-        path.addLine(to: CGPoint(x: rect.width, y: rect.height / 3 * 2))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height * 2 / 3))
 
         return path
     }

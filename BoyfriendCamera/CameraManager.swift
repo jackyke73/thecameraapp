@@ -1,8 +1,3 @@
-//
-//  CameraManager.swift
-//  BoyfriendCamera
-//
-
 import AVFoundation
 import SwiftUI
 import Combine
@@ -11,17 +6,24 @@ import Photos
 import UIKit
 import CoreLocation
 import AudioToolbox
+import ImageIO
 
 final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
 
-    // MARK: - Published State
     @Published var permissionGranted = false
+    // Guidance (normalized 0...1 in preview space)
+    @Published var nosePoint: CGPoint? = nil
+    @Published var targetPoint: CGPoint = CGPoint(x: 0.5, y: 0.38)   // tweak this
+    @Published var isGuidanceActive: Bool = false
 
-    // ✅ AI / Detection state
+    // AI state
     @Published var isAIFeaturesEnabled: Bool = true
     @Published var isPersonDetected = false
     @Published var peopleCount: Int = 0
     @Published var expressions: [String] = []
+
+    // ✅ draw-ready nose point in preview coordinates (points)
+    @Published var nosePointInPreview: CGPoint?
 
     @Published var capturedImage: UIImage?
 
@@ -43,15 +45,11 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     // Camera Position
     @Published var currentPosition: AVCaptureDevice.Position = .back
 
-    // MARK: - Private
     private var zoomScaler: CGFloat = 2.0
 
     let session = AVCaptureSession()
 
-    // Session/device control queue
     private let sessionQueue = DispatchQueue(label: "camera.sessionQueue")
-
-    // Frame processing queue
     private let videoOutputQueue = DispatchQueue(label: "camera.videoOutputQueue", qos: .utility)
 
     private let videoOutput = AVCaptureVideoDataOutput()
@@ -64,12 +62,14 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private var pendingAspectRatio: CGFloat = 4.0 / 3.0
 
     let captureDidFinish = PassthroughSubject<Void, Never>()
-
-    // KVO lens switching
     private var primaryConstituentObservation: NSKeyValueObservation?
 
-    // ✅ AI engine (moved out to CameraAIEngine.swift)
+    // ✅ AI engine
     private let aiEngine = CameraAIEngine()
+
+    // ✅ The preview layer reference (set by CameraPreview)
+    weak var previewLayer: AVCaptureVideoPreviewLayer?
+    // Allow SwiftUI preview view to hand us the layer (optional, but you referenced it)
 
     override init() {
         super.init()
@@ -81,7 +81,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         primaryConstituentObservation = nil
     }
 
-    // MARK: - Output Setup
     private func configureOutputs() {
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.videoSettings = [
@@ -89,7 +88,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         ]
     }
 
-    // MARK: - Virtual vs Physical Device Helpers
     private func configurationDevice() -> AVCaptureDevice? {
         guard let device = activeDevice else { return nil }
         if #available(iOS 13.0, *) {
@@ -117,7 +115,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    // MARK: - SWITCH CAMERA
     func switchCamera() {
         currentPosition = (currentPosition == .back) ? .front : .back
         sessionQueue.async {
@@ -134,7 +131,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    // MARK: - PRO SETTINGS
+    // MARK: - Pro Settings
     func setExposure(ev: Float) {
         sessionQueue.async {
             guard let device = self.configurationDevice() else { return }
@@ -216,6 +213,11 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             }
         }
     }
+    func setFocus(layerPoint: CGPoint) {
+        guard let previewLayer else { return }
+        let devicePoint = previewLayer.captureDevicePointConverted(fromLayerPoint: layerPoint)
+        setFocus(point: devicePoint)
+    }
 
     func resetSettings() {
         sessionQueue.async {
@@ -235,7 +237,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    // MARK: - ZOOM
+    // MARK: - Zoom
     func setZoomInstant(_ uiFactor: CGFloat) {
         sessionQueue.async {
             guard let device = self.activeDevice else { return }
@@ -272,7 +274,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    // MARK: - CAPTURE
+    // MARK: - Capture
     func capturePhoto(location: CLLocation?, aspectRatioValue: CGFloat, useTimer: Bool) {
         if useTimer {
             timerCount = 3
@@ -327,7 +329,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         DispatchQueue.main.async { self.captureDidFinish.send(()) }
     }
 
-    // MARK: - Image Helpers
     private func cropToRatio(_ image: UIImage, ratio: CGFloat) -> UIImage {
         let w = image.size.width
         let h = image.size.height
@@ -360,7 +361,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         return normalized
     }
 
-    // MARK: - Save
     private func saveToCustomAlbum(imageData: Data, location: CLLocation?) {
         PHPhotoLibrary.requestAuthorization { status in
             guard status == .authorized || status == .limited else { return }
@@ -400,7 +400,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         }
     }
 
-    // MARK: - SETUP
+    // MARK: - Setup
     private func setupCamera() {
         session.beginConfiguration()
         session.sessionPreset = .photo
@@ -452,6 +452,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
         if let conn = videoOutput.connection(with: .video) {
             conn.videoOrientation = .portrait
+            conn.automaticallyAdjustsVideoMirroring = false
             conn.isVideoMirrored = (currentPosition == .front)
         }
 
@@ -470,12 +471,18 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             }
 
             self.setZoomInstant(1.0)
+
+            // ✅ match preview layer mirroring too (important!)
+            if let pconn = self.previewLayer?.connection {
+                pconn.videoOrientation = .portrait
+                pconn.automaticallyAdjustsVideoMirroring = false
+                pconn.isVideoMirrored = (self.currentPosition == .front)
+            }
         }
 
         refreshCapabilities()
     }
 
-    // MARK: - Permissions
     func checkPermissions() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
@@ -494,6 +501,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     }
 
     // MARK: - Vision (AI)
+    // MARK: - Vision (AI)
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
@@ -501,11 +509,33 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         guard isAIFeaturesEnabled else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        if let out = aiEngine.process(pixelBuffer: pixelBuffer, orientation: .right) {
+        let mirrored = (currentPosition == .front)
+
+        if let out = aiEngine.process(pixelBuffer: pixelBuffer,
+                                      orientation: .right,
+                                      isMirrored: mirrored) {
+
             DispatchQueue.main.async {
                 self.isPersonDetected = out.isPersonDetected
                 self.peopleCount = out.peopleCount
                 self.expressions = out.expressions
+
+                // device-normalized (0..1)
+                self.nosePoint = out.nosePoint
+
+                // convert to actual preview pixels for drawing (this fixes “flipped / I don’t know where it is”)
+                if let nose = out.nosePoint, let layer = self.previewLayer {
+                    self.nosePointInPreview = layer.layerPointConverted(fromCaptureDevicePoint: nose)
+
+                    // also compute guidance in the SAME coordinate system (device normalized)
+                    let dx = nose.x - self.targetPoint.x
+                    let dy = nose.y - self.targetPoint.y
+                    let dist = sqrt(dx * dx + dy * dy)
+                    self.isGuidanceActive = dist > 0.035
+                } else {
+                    self.nosePointInPreview = nil
+                    self.isGuidanceActive = false
+                }
             }
         }
     }
@@ -539,3 +569,4 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         setFocus(point: devicePoint)
     }
 }
+

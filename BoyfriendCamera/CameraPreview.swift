@@ -5,15 +5,26 @@ import UIKit
 struct CameraPreview: UIViewRepresentable {
     let cameraManager: CameraManager
 
-    // ✅ NEW: notify SwiftUI that user tapped the viewfinder
     var onUserInteraction: (() -> Void)? = nil
+    var onPreviewSizeChange: ((CGSize) -> Void)? = nil
 
     func makeUIView(context: Context) -> CameraPreviewView {
         let view = CameraPreviewView()
         view.session = cameraManager.session
 
+        // Give CameraManager access to the previewLayer if you use it elsewhere
+        cameraManager.previewLayer = view.videoPreviewLayer
+
+        // Hook size callback
+        view.onSizeChange = { size in
+            onPreviewSizeChange?(size)
+        }
+
         // Tap Gesture
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTap(_:))
+        )
         view.addGestureRecognizer(tap)
 
         return view
@@ -28,7 +39,6 @@ struct CameraPreview: UIViewRepresentable {
         init(_ parent: CameraPreview) { self.parent = parent }
 
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            // ✅ reveal hidden controls like Apple Camera does
             parent.onUserInteraction?()
 
             guard let view = gesture.view as? CameraPreviewView else { return }
@@ -41,29 +51,30 @@ struct CameraPreview: UIViewRepresentable {
             let capturePoint = view.videoPreviewLayer.captureDevicePointConverted(fromLayerPoint: point)
             parent.cameraManager.setFocus(point: capturePoint)
 
-            // Haptic
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         }
     }
 }
 
-class CameraPreviewView: UIView {
-    var videoPreviewLayer: AVCaptureVideoPreviewLayer { return layer as! AVCaptureVideoPreviewLayer }
+final class CameraPreviewView: UIView {
+    var videoPreviewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+
+    var onSizeChange: ((CGSize) -> Void)?
 
     var session: AVCaptureSession? {
-        get { return videoPreviewLayer.session }
+        get { videoPreviewLayer.session }
         set { videoPreviewLayer.session = newValue }
     }
 
-    override class var layerClass: AnyClass { return AVCaptureVideoPreviewLayer.self }
+    override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         videoPreviewLayer.frame = bounds
         videoPreviewLayer.videoGravity = .resizeAspectFill
+        onSizeChange?(bounds.size)
     }
 
-    // Yellow focus box animation
     func showFocusBox(at point: CGPoint) {
         let box = UIView(frame: CGRect(x: 0, y: 0, width: 70, height: 70))
         box.center = point

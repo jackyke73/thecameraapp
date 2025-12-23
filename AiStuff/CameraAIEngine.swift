@@ -2,13 +2,17 @@ import Foundation
 import Vision
 import CoreML
 import CoreImage
-import ImageIO   // for CGImagePropertyOrientation
+import ImageIO
+import CoreGraphics
 
-// MARK: - AI Output
-struct CameraAIOutput: Equatable {
+// MARK: - AI Output (RENAMED to avoid collisions)
+struct CameraAIResult: Equatable {
     let isPersonDetected: Bool
     let peopleCount: Int
     let expressions: [String]
+
+    // CaptureDevice coords: x 0...1 left->right, y 0...1 top->bottom
+    let nosePoint: CGPoint?
 }
 
 // MARK: - Rolling label smoother
@@ -16,9 +20,7 @@ final class RollingLabelBuffer {
     private let size: Int
     private var arr: [String] = []
 
-    init(size: Int) {
-        self.size = max(3, size)
-    }
+    init(size: Int) { self.size = max(3, size) }
 
     func push(_ s: String) {
         arr.append(s)
@@ -38,7 +40,7 @@ final class CameraAIEngine {
 
     // Vision requests
     private let poseRequest = VNDetectHumanBodyPoseRequest()
-    private let faceRectRequest = VNDetectFaceRectanglesRequest()
+    private let faceLandmarksRequest = VNDetectFaceLandmarksRequest()
     private let visionHandler = VNSequenceRequestHandler()
 
     // CoreML model
@@ -70,10 +72,16 @@ final class CameraAIEngine {
     private var labelBuffers: [UUID: RollingLabelBuffer] = [:]
 
     // Cache last output
-    private var lastOutput: CameraAIOutput = .init(isPersonDetected: false, peopleCount: 0, expressions: [])
+    private var lastOutput: CameraAIResult = .init(
+        isPersonDetected: false,
+        peopleCount: 0,
+        expressions: [],
+        nosePoint: nil
+    )
 
     func process(pixelBuffer: CVPixelBuffer,
-                 orientation: CGImagePropertyOrientation = .right) -> CameraAIOutput? {
+                 orientation: CGImagePropertyOrientation = .right,
+                 isMirrored: Bool = false) -> CameraAIResult? {
 
         frameCounter += 1
         guard frameCounter % detectEveryNFrames == 0 else { return nil }
@@ -81,10 +89,9 @@ final class CameraAIEngine {
         isBusy = true
         defer { isBusy = false }
 
-        // ✅ IMPORTANT: return the autoreleasepool value (typed as CameraAIOutput?)
-        return autoreleasepool { () -> CameraAIOutput? in
+        return autoreleasepool { () -> CameraAIResult? in
             do {
-                try visionHandler.perform([poseRequest, faceRectRequest],
+                try visionHandler.perform([poseRequest, faceLandmarksRequest],
                                           on: pixelBuffer,
                                           orientation: orientation)
             } catch {
@@ -92,13 +99,19 @@ final class CameraAIEngine {
             }
 
             let poseCount = poseRequest.results?.count ?? 0
-            let faces = (faceRectRequest.results as? [VNFaceObservation]) ?? []
+            let faces = (faceLandmarksRequest.results as? [VNFaceObservation]) ?? []
             let faceCount = faces.count
 
             let peopleCount = max(poseCount, faceCount)
             let isDetected = peopleCount > 0
 
-            // run emotion less frequently (expensive)
+            // Primary face = largest
+            let primaryFace = faces.max(by: { area($0.boundingBox) < area($1.boundingBox) })
+
+            // Nose point from landmarks (best effort)
+            let nosePoint = primaryFace.flatMap { extractNosePoint(face: $0, isMirrored: isMirrored) }
+
+            // Emotion (less frequently)
             var exprs: [String] = lastOutput.expressions
             emotionCounter += 1
             if emotionCounter % emotionEveryNDetections == 0 {
@@ -107,9 +120,12 @@ final class CameraAIEngine {
                                             orientation: orientation)
             }
 
-            let output = CameraAIOutput(isPersonDetected: isDetected,
-                                        peopleCount: peopleCount,
-                                        expressions: exprs)
+            let output = CameraAIResult(
+                isPersonDetected: isDetected,
+                peopleCount: peopleCount,
+                expressions: exprs,
+                nosePoint: nosePoint
+            )
 
             if output != lastOutput {
                 lastOutput = output
@@ -118,6 +134,45 @@ final class CameraAIEngine {
                 return nil
             }
         }
+    }
+
+    // MARK: - Nose extraction (landmarks -> image norm -> captureDevice point)
+    private func extractNosePoint(face: VNFaceObservation, isMirrored: Bool) -> CGPoint? {
+        guard let lm = face.landmarks else { return nil }
+
+        // Try the most reliable regions first
+        let region =
+            lm.noseCrest ??
+            lm.nose ??
+            lm.medianLine
+
+        guard let reg = region else { return nil }
+        let pts = reg.normalizedPoints
+        guard !pts.isEmpty else { return nil }
+
+        // Average landmark points in face-local coords (0..1)
+        var sx: CGFloat = 0
+        var sy: CGFloat = 0
+        for p in pts { sx += p.x; sy += p.y }
+        let ax = sx / CGFloat(pts.count)
+        let ay = sy / CGFloat(pts.count)
+
+        // Convert face-local coords into image-normalized coords (Vision bb origin is bottom-left)
+        let bb = face.boundingBox
+        let xImg = bb.origin.x + ax * bb.size.width
+        let yImg = bb.origin.y + ay * bb.size.height
+
+        // Convert to captureDevice coords (top-left origin)
+        var deviceP = CGPoint(x: xImg, y: 1.0 - yImg)
+
+        // Front camera preview is mirrored; Vision results are not.
+        if isMirrored { deviceP.x = 1.0 - deviceP.x }
+
+        // Clamp to safe range
+        deviceP.x = max(0, min(1, deviceP.x))
+        deviceP.y = max(0, min(1, deviceP.y))
+
+        return deviceP
     }
 
     // MARK: - Expression inference
@@ -135,12 +190,11 @@ final class CameraAIEngine {
 
         var results: [String] = []
         for face in chosen {
-            guard let faceCrop = cropFaceCIImage(from: pixelBuffer, faceBoundingBox: face.boundingBox) else {
-                results.append("Unknown")
-                continue
-            }
+            let (rawLabel, conf) = runEmotionModel(model: model,
+                                                  pixelBuffer: pixelBuffer,
+                                                  roi: face.boundingBox,
+                                                  orientation: orientation)
 
-            let (rawLabel, conf) = runEmotionModel(model: model, faceCrop: faceCrop, orientation: orientation)
             let normalized = normalizeLabel(rawLabel, confidence: conf)
 
             let id = face.uuid
@@ -151,17 +205,16 @@ final class CameraAIEngine {
             results.append(buf.mode())
         }
 
-        // cap buffer growth
         if labelBuffers.count > 16 {
-            let trimmed = Array(labelBuffers.prefix(12))
-            labelBuffers = Dictionary(uniqueKeysWithValues: trimmed)
+            labelBuffers = Dictionary(uniqueKeysWithValues: Array(labelBuffers.prefix(12)))
         }
 
         return results
     }
 
     private func runEmotionModel(model: VNCoreMLModel,
-                                 faceCrop: CIImage,
+                                 pixelBuffer: CVPixelBuffer,
+                                 roi: CGRect,
                                  orientation: CGImagePropertyOrientation) -> (String, Float) {
 
         var bestLabel = "Unknown"
@@ -174,35 +227,19 @@ final class CameraAIEngine {
             bestConf = top.confidence
         }
 
-        request.imageCropAndScaleOption = VNImageCropAndScaleOption.scaleFill
+        request.imageCropAndScaleOption = .centerCrop
+        request.regionOfInterest = roi
 
-        let handler = VNImageRequestHandler(ciImage: faceCrop, orientation: orientation, options: [:])
         do {
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
+                                                orientation: orientation,
+                                                options: [:])
             try handler.perform([request])
         } catch {
             return ("Unknown", 0)
         }
 
         return (bestLabel, bestConf)
-    }
-
-    // MARK: - Helpers
-    private func cropFaceCIImage(from pixelBuffer: CVPixelBuffer,
-                                 faceBoundingBox: CGRect) -> CIImage? {
-
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let width = ciImage.extent.width
-        let height = ciImage.extent.height
-
-        let x = faceBoundingBox.origin.x * width
-        let y = (1.0 - faceBoundingBox.origin.y - faceBoundingBox.size.height) * height
-        let w = faceBoundingBox.size.width * width
-        let h = faceBoundingBox.size.height * height
-
-        let rect = CGRect(x: x, y: y, width: w, height: h).integral
-        guard rect.width > 10, rect.height > 10 else { return nil }
-
-        return ciImage.cropped(to: rect)
     }
 
     private func normalizeLabel(_ raw: String, confidence: Float) -> String {
