@@ -47,6 +47,20 @@ struct ContentView: View {
     @State private var isGridEnabled = false
     @State private var isTimerEnabled = false
 
+    // ✅ Top bar measurements (for collision-avoidance + bounding)
+    @State private var topBarGlobalFrame: CGRect = .zero
+    @State private var topBarLeftWidth: CGFloat = 0
+    @State private var topBarRightWidth: CGFloat = 0
+
+
+    @State private var previewGlobalFrame: CGRect = .zero
+    // ✅ Floating AI HUD (draggable, constrained to the camera preview)
+    @State private var showFloatingAIHUD = false
+    @State private var floatingHUDOffset: CGSize = .zero
+    @State private var floatingHUDStartOffset: CGSize = .zero
+    @State private var isDraggingFloatingHUD = false
+    @State private var floatingHUDSize: CGSize = .zero
+
     // ✅ Landmark lock toggle
     @State private var isLandmarkLockEnabled = true
 
@@ -66,6 +80,23 @@ struct ContentView: View {
         )
     }
 
+
+
+    // ✅ Clamp floating HUD offset so it never leaves the visible camera preview.
+    private func _clampFloatingHUDOffset(_ proposed: CGSize,
+                                        previewSize: CGSize,
+                                        hudSize: CGSize,
+                                        padding: CGFloat,
+                                        minYOffset: CGFloat = 0) -> CGSize {
+        let maxX = max(0, previewSize.width - hudSize.width - 2 * padding)
+
+        let rawMaxY = previewSize.height - hudSize.height - 2 * padding
+        let maxY = max(minYOffset, max(0, rawMaxY))
+
+        let x = min(max(0, proposed.width), maxX)
+        let y = min(max(minYOffset, proposed.height), maxY)
+        return CGSize(width: x, height: y)
+    }
     // Zoom gesture start
     @State private var startZoomValue: CGFloat = 1.0
 
@@ -90,7 +121,7 @@ struct ContentView: View {
                         ? (currentAspectRatio.value / sensorRatio)
                         : 1.0
 
-                        ZStack {
+                        ZStack(alignment: .topLeading) {
                             ZStack {
                                 CameraPreview(cameraManager: cameraManager)
                                     .frame(width: width, height: sensorHeight)
@@ -109,10 +140,133 @@ struct ContentView: View {
                                         .frame(width: width, height: targetHeight)
                                 }
                             }
+
+                            // ✅ Optional floating AI HUD inside the camera preview
+                            if showFloatingAIHUD && cameraManager.isAIFeaturesEnabled {
+                                let padding: CGFloat = 8
+                                let previewSize = CGSize(width: width, height: targetHeight)
+
+                                // Keep the floating HUD from overlapping the top menu bar.
+                                // Compute how much of the preview's top area is covered by the menu bar (in preview-local coords).
+                                let overlap = max(0, topBarGlobalFrame.maxY - previewGlobalFrame.minY)
+                                let minYOffset = max(0, overlap + 6 - padding)
+
+                                // Always render using a clamped offset (even if state was previously out-of-bounds)
+                                let effectiveOffset = _clampFloatingHUDOffset(
+                                    floatingHUDOffset,
+                                    previewSize: previewSize,
+                                    hudSize: floatingHUDSize,
+                                    padding: padding,
+                                    minYOffset: minYOffset
+                                )
+
+                                AIDebugHUD(cameraManager: cameraManager, compact: false, isInteractive: true)
+                                    .background(
+                                        GeometryReader { proxy in
+                                            Color.clear
+                                                .preference(key: _ViewSizePreferenceKey.self, value: proxy.size)
+                                        }
+                                    )
+                                    .onPreferenceChange(_ViewSizePreferenceKey.self) { newSize in
+                                        floatingHUDSize = newSize
+                                        floatingHUDOffset = _clampFloatingHUDOffset(
+                                            floatingHUDOffset,
+                                            previewSize: previewSize,
+                                            hudSize: newSize,
+                                            padding: padding,
+                                            minYOffset: minYOffset
+                                        )
+                                    }
+                                    .onAppear {
+                                        // Clamp on first appearance so it can't start outside the preview
+                                        floatingHUDOffset = _clampFloatingHUDOffset(
+                                            floatingHUDOffset,
+                                            previewSize: previewSize,
+                                            hudSize: floatingHUDSize,
+                                            padding: padding,
+                                            minYOffset: minYOffset
+                                        )
+                                    }
+                                    .onChange(of: topBarGlobalFrame) { _, _ in
+                                        // Re-clamp if the top bar layout changes (e.g., device rotation / layout updates)
+                                        let overlap = max(0, topBarGlobalFrame.maxY - previewGlobalFrame.minY)
+                                        let minYOffset = max(0, overlap + 6 - padding)
+                                        floatingHUDOffset = _clampFloatingHUDOffset(
+                                            floatingHUDOffset,
+                                            previewSize: previewSize,
+                                            hudSize: floatingHUDSize,
+                                            padding: padding,
+                                            minYOffset: minYOffset
+                                        )
+                                    }
+                                    .onChange(of: currentAspectRatio) { _, _ in
+                                        floatingHUDOffset = _clampFloatingHUDOffset(
+                                            floatingHUDOffset,
+                                            previewSize: previewSize,
+                                            hudSize: floatingHUDSize,
+                                            padding: padding,
+                                            minYOffset: minYOffset
+                                        )
+                                    }
+                                    .onChange(of: previewGlobalFrame) { _, _ in
+                                        floatingHUDOffset = _clampFloatingHUDOffset(
+                                            floatingHUDOffset,
+                                            previewSize: previewSize,
+                                            hudSize: floatingHUDSize,
+                                            padding: padding,
+                                            minYOffset: minYOffset
+                                        )
+                                    }
+                                    .offset(x: padding + effectiveOffset.width, y: padding + effectiveOffset.height)
+                                    .gesture(
+                                        DragGesture()
+                                            .onChanged { value in
+                                                if !isDraggingFloatingHUD {
+                                                    isDraggingFloatingHUD = true
+                                                    floatingHUDOffset = _clampFloatingHUDOffset(
+                                                        floatingHUDOffset,
+                                                        previewSize: previewSize,
+                                                        hudSize: floatingHUDSize,
+                                                        padding: padding,
+                                                        minYOffset: minYOffset
+                                                    )
+                                                    floatingHUDStartOffset = floatingHUDOffset
+                                                }
+
+                                                let proposedX = floatingHUDStartOffset.width + value.translation.width
+                                                let proposedY = floatingHUDStartOffset.height + value.translation.height
+
+                                                floatingHUDOffset = _clampFloatingHUDOffset(
+                                                    CGSize(width: proposedX, height: proposedY),
+                                                    previewSize: previewSize,
+                                                    hudSize: floatingHUDSize,
+                                                    padding: padding,
+                                                    minYOffset: minYOffset
+                                                )
+                                            }
+                                            .onEnded { _ in
+                                                isDraggingFloatingHUD = false
+                                                floatingHUDOffset = _clampFloatingHUDOffset(
+                                                    floatingHUDOffset,
+                                                    previewSize: previewSize,
+                                                    hudSize: floatingHUDSize,
+                                                    padding: padding,
+                                                    minYOffset: minYOffset
+                                                )
+                                            }
+                                    )
+                                    .transition(.opacity)
+                            }
                         }
                         .frame(width: width, height: targetHeight)
                         .clipped()
                         .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .preference(key: _PreviewGlobalFrameKey.self, value: proxy.frame(in: .global))
+                            }
+                        )
                         .gesture(
                             MagnificationGesture()
                                 .onChanged { val in
@@ -129,21 +283,6 @@ struct ContentView: View {
                     }
                     .ignoresSafeArea()
 
-                    // ✅ 2) AI HUD (floating, notch-safe; hides while Settings is open)
-                    VStack {
-                        HStack {
-                            AIDebugHUD(cameraManager: cameraManager)
-                                .padding(.leading, 14)
-                                // pulled up closer to the top
-                                .padding(.top, topSafe + 40)
-                                .opacity(showSettings ? 0 : 1)
-                            Spacer()
-                        }
-                        Spacer()
-                    }
-                    .ignoresSafeArea(edges: .top)
-                    .zIndex(500)
-
                     // 3) LANDMARK OVERLAYS (only when lock enabled)
                     if isLandmarkLockEnabled, let advice = currentAdvice {
                         FloatingTargetView(angleDiff: advice.turnAngle, isLocked: abs(advice.turnAngle) < 3)
@@ -153,207 +292,110 @@ struct ContentView: View {
                     // 4) UI CONTROLS
                     VStack {
                         // --- TOP BAR ---
-                        HStack(alignment: .top) {
-                            // Map button (top-left)
-                            Button { showMap = true } label: {
-                                Image(systemName: "map.fill")
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                    .padding(10)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Circle())
-                            }
-
-                            // GPS + AI ON/OFF (AI toggle right below GPS)
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack(spacing: 6) {
-                                    Circle()
-                                        .fill(locationManager.permissionGranted ? Color.green : Color.red)
-                                        .frame(width: 6, height: 6)
-                                    Text(locationManager.permissionGranted ? "GPS" : "NO GPS")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .lineLimit(1)
-                                        .fixedSize(horizontal: true, vertical: false)
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.black.opacity(0.4))
-                                .cornerRadius(12)
-
-                                Button {
-                                    cameraManager.isAIFeaturesEnabled.toggle()
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Circle()
-                                            .fill(cameraManager.isAIFeaturesEnabled ? Color.green : Color.gray)
-                                            .frame(width: 6, height: 6)
-                                        Text(cameraManager.isAIFeaturesEnabled ? "AI ON" : "AI OFF")
-                                            .font(.system(size: 10, weight: .bold))
+                        ZStack(alignment: .top) {
+                            HStack(alignment: .top) {
+                                // Left cluster
+                                HStack(alignment: .top, spacing: 12) {
+                                    // Map button (top-left)
+                                    Button { showMap = true } label: {
+                                        Image(systemName: "map.fill")
+                                            .font(.headline)
                                             .foregroundColor(.white)
-                                            .lineLimit(1)
-                                            .fixedSize(horizontal: true, vertical: false)
+                                            .padding(10)
+                                            .background(.ultraThinMaterial)
+                                            .clipShape(Circle())
                                     }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.black.opacity(0.4))
-                                    .cornerRadius(12)
+
+                                    // GPS + AI ON/OFF (AI toggle right below GPS)
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack(spacing: 6) {
+                                            Circle()
+                                                .fill(locationManager.permissionGranted ? Color.green : Color.red)
+                                                .frame(width: 6, height: 6)
+                                            Text(locationManager.permissionGranted ? "GPS" : "NO GPS")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .lineLimit(1)
+                                                .fixedSize(horizontal: true, vertical: false)
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(Color.black.opacity(0.4))
+                                        .cornerRadius(12)
+
+                                        Button {
+                                            cameraManager.isAIFeaturesEnabled.toggle()
+                                        } label: {
+                                            HStack(spacing: 6) {
+                                                Circle()
+                                                    .fill(cameraManager.isAIFeaturesEnabled ? Color.green : Color.gray)
+                                                    .frame(width: 6, height: 6)
+                                                Text(cameraManager.isAIFeaturesEnabled ? "AI ON" : "AI OFF")
+                                                    .font(.system(size: 10, weight: .bold))
+                                                    .foregroundColor(.white)
+                                                    .lineLimit(1)
+                                                    .fixedSize(horizontal: true, vertical: false)
+                                            }
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.black.opacity(0.4))
+                                            .cornerRadius(12)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(.top, 2)
                                 }
-                                .buttonStyle(.plain)
+                                .background(
+                                    GeometryReader { proxy in
+                                        Color.clear
+                                            .preference(key: _TopBarLeftWidthKey.self, value: proxy.size.width)
+                                    }
+                                )
+
+                                Spacer()
+
+                                // Right cluster
+                                HStack(alignment: .top, spacing: 12) {
+                                    Button { withAnimation { showSettings.toggle() } } label: {
+                                        Image(systemName: "slider.horizontal.3")
+                                            .font(.headline)
+                                            .foregroundColor(showSettings ? .yellow : .white)
+                                            .padding(10)
+                                            .background(.ultraThinMaterial)
+                                            .clipShape(Circle())
+                                    }
+                                }
+                                .background(
+                                    GeometryReader { proxy in
+                                        Color.clear
+                                            .preference(key: _TopBarRightWidthKey.self, value: proxy.size.width)
+                                    }
+                                )
                             }
-                            .padding(.top, 2)
 
-                            Spacer()
-
-                            // Settings Button (kept where it was)
-                            Button { withAnimation { showSettings.toggle() } } label: {
-                                Image(systemName: "slider.horizontal.3")
-                                    .font(.headline)
-                                    .foregroundColor(showSettings ? .yellow : .white)
-                                    .padding(10)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Circle())
-                            }
-
-                            // Aspect Ratio Button (kept where it was)
-                            Button { toggleAspectRatio() } label: {
-                                Text(currentAspectRatio.rawValue)
-                                    .font(.footnote.bold())
-                                    .foregroundColor(.white)
-                                    .padding(10)
-                                    .background(.ultraThinMaterial)
-                                    .clipShape(Capsule())
-                                    .overlay(
-                                        Capsule().stroke(
-                                            Color.yellow,
-                                            lineWidth: currentAspectRatio != .fourThree ? 1 : 0
-                                        )
-                                    )
+                            // Center AI HUD (only when AI is ON). Clamped to available width so it never overlaps.
+                            if cameraManager.isAIFeaturesEnabled {
+                                let available = max(0, outerGeo.size.width - topBarLeftWidth - topBarRightWidth - 2 * 16)
+                                if available > 140 {
+                                    AIDebugHUD(cameraManager: cameraManager, compact: true)
+                                        .frame(maxWidth: available)
+                                        .padding(.top, 2)
+                                        .allowsHitTesting(false)
+                                }
                             }
                         }
                         // ✅ notch-safe top padding (pulled slightly upward)
                         .padding(.top, topSafe + 2)
                         .padding(.horizontal)
-
-                        // --- SETTINGS PANEL (Liquid Glass) ---
-                        if showSettings {
-                            VStack(spacing: 14) {
-                                // Toggles row 1
-                                HStack(spacing: 12) {
-                                    ToggleButton(icon: "grid", label: "Grid", isOn: $isGridEnabled)
-                                    ToggleButton(icon: "timer", label: "3s Timer", isOn: $isTimerEnabled)
-                                }
-
-                                // Toggles row 2
-                                HStack(spacing: 12) {
-                                    ToggleButton(icon: "scope", label: "Lock", isOn: $isLandmarkLockEnabled)
-                                        .onChange(of: isLandmarkLockEnabled) { _, on in
-                                            if !on {
-                                                withAnimation { currentAdvice = nil }
-                                            } else {
-                                                updateNavigationLogic(force: true)
-                                            }
-                                        }
-
-                                    ToggleButton(icon: "sparkles", label: "AI", isOn: $cameraManager.isAIFeaturesEnabled)
-                                }
-
-                                // Exposure
-                                HStack {
-                                    Image(systemName: "sun.max.fill")
-                                        .font(.caption)
-                                        .foregroundColor(.white)
-                                    Slider(value: $exposureValue, in: -2...2)
-                                        .tint(.yellow)
-                                        .onChange(of: exposureValue) { _, val in
-                                            cameraManager.setExposure(ev: val)
-                                        }
-                                    Text(String(format: "%.1f", exposureValue))
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundColor(.white)
-                                        .frame(width: 34)
-                                }
-
-                                // WB
-                                if cameraManager.isWBSupported {
-                                    HStack {
-                                        Image(systemName: "thermometer")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                        Slider(value: $whiteBalanceValue, in: 3000...8000)
-                                            .tint(.orange)
-                                            .onChange(of: whiteBalanceValue) { _, val in
-                                                cameraManager.setWhiteBalance(kelvin: val)
-                                            }
-                                        Text("\(Int(whiteBalanceValue))K")
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundColor(.white)
-                                            .frame(width: 55)
-                                    }
-                                }
-
-                                // Focus
-                                if cameraManager.isFocusSupported {
-                                    HStack {
-                                        Image(systemName: "flower")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                        Slider(value: $focusValue, in: 0.0...1.0)
-                                            .tint(.cyan)
-                                            .onChange(of: focusValue) { _, val in
-                                                cameraManager.setLensPosition(val)
-                                            }
-                                        Image(systemName: "mountain.2")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                    }
-                                }
-
-                                // Torch
-                                if cameraManager.isTorchSupported {
-                                    HStack {
-                                        Image(systemName: "bolt.slash.fill")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                        Slider(value: $torchValue, in: 0.0...1.0)
-                                            .tint(.white)
-                                            .onChange(of: torchValue) { _, val in
-                                                cameraManager.setTorchLevel(val)
-                                            }
-                                        Image(systemName: "bolt.fill")
-                                            .font(.caption)
-                                            .foregroundColor(.yellow)
-                                    }
-                                }
-
-                                // Reset
-                                Button("Reset All") {
-                                    exposureValue = 0
-                                    whiteBalanceValue = 5500
-                                    focusValue = 0.5
-                                    torchValue = 0.0
-                                    cameraManager.resetSettings()
-                                }
-                                .font(.caption.bold())
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.yellow)
-                                .cornerRadius(8)
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .preference(key: _TopBarGlobalFrameKey.self, value: proxy.frame(in: .global))
                             }
-                            .padding(14)
-                            .background(
-                                .ultraThinMaterial,
-                                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
-                            )
-                            .shadow(color: Color.black.opacity(0.25), radius: 14, x: 0, y: 6)
-                            .padding(.horizontal)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                        }
+                        )
+                        .onPreferenceChange(_TopBarGlobalFrameKey.self) { topBarGlobalFrame = $0 }
+                        .onPreferenceChange(_TopBarLeftWidthKey.self) { topBarLeftWidth = $0 }
+                        .onPreferenceChange(_TopBarRightWidthKey.self) { topBarRightWidth = $0 }
 
                         Spacer()
 
@@ -488,6 +530,172 @@ struct ContentView: View {
                             .transition(.scale.combined(with: .opacity))
                             .zIndex(200)
                     }
+
+
+                    // --- SETTINGS SHEET OVERLAY (on top of everything; does not push layout) ---
+                    if showSettings {
+                        // Leave the top menu bar clickable; block interactions below it.
+                        VStack(spacing: 0) {
+                            Color.clear.frame(height: max(topSafe + 54, topBarGlobalFrame.maxY))
+                            Color.black.opacity(0.001)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        .ignoresSafeArea()
+                        .zIndex(800)
+
+                        VStack(spacing: 0) {
+                            Color.clear.frame(height: max(topSafe + 54, topBarGlobalFrame.maxY) + 8)
+                            VStack(spacing: 14) {
+                                // Toggles row 1
+                                HStack(spacing: 12) {
+                                    ToggleButton(icon: "grid", label: "Grid", isOn: $isGridEnabled)
+                                    ToggleButton(icon: "timer", label: "3s Timer", isOn: $isTimerEnabled)
+                                }
+
+                                // Toggles row 2
+                                HStack(spacing: 12) {
+                                    ToggleButton(icon: "scope", label: "Lock", isOn: $isLandmarkLockEnabled)
+                                        .onChange(of: isLandmarkLockEnabled) { _, on in
+                                            if !on {
+                                                withAnimation { currentAdvice = nil }
+                                            } else {
+                                                updateNavigationLogic(force: true)
+                                            }
+                                        }
+
+                                    ToggleButton(icon: "sparkles", label: "AI", isOn: $cameraManager.isAIFeaturesEnabled)
+                                }
+
+                                // Floating AI HUD toggle
+                                HStack {
+                                    Spacer()
+                                    ToggleButton(icon: "rectangle.and.hand.point.up.left", label: "HUD", isOn: $showFloatingAIHUD)
+                                    Spacer()
+                                }
+
+                                // Aspect Ratio (moved from the top bar into Settings)
+                                HStack {
+                                    Spacer()
+                                    Button { toggleAspectRatio() } label: {
+                                        Text(currentAspectRatio.rawValue)
+                                            .font(.footnote.bold())
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(
+                                                .ultraThinMaterial,
+                                                in: Capsule(style: .continuous)
+                                            )
+                                            .overlay(
+                                                Capsule(style: .continuous)
+                                                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                    Spacer()
+                                }
+
+                                // Exposure
+                                HStack {
+                                    Image(systemName: "sun.max.fill")
+                                        .font(.caption)
+                                        .foregroundColor(.white)
+                                    Slider(value: $exposureValue, in: -2...2)
+                                        .tint(.yellow)
+                                        .onChange(of: exposureValue) { _, val in
+                                            cameraManager.setExposure(ev: val)
+                                        }
+                                    Text(String(format: "%.1f", exposureValue))
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundColor(.white)
+                                        .frame(width: 34)
+                                }
+
+                                // WB
+                                if cameraManager.isWBSupported {
+                                    HStack {
+                                        Image(systemName: "thermometer")
+                                            .font(.caption)
+                                            .foregroundColor(.white)
+                                        Slider(value: $whiteBalanceValue, in: 3000...8000)
+                                            .tint(.orange)
+                                            .onChange(of: whiteBalanceValue) { _, val in
+                                                cameraManager.setWhiteBalance(kelvin: val)
+                                            }
+                                        Text("\(Int(whiteBalanceValue))K")
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundColor(.white)
+                                            .frame(width: 55)
+                                    }
+                                }
+
+                                // Focus
+                                if cameraManager.isFocusSupported {
+                                    HStack {
+                                        Image(systemName: "flower")
+                                            .font(.caption)
+                                            .foregroundColor(.white)
+                                        Slider(value: $focusValue, in: 0.0...1.0)
+                                            .tint(.cyan)
+                                            .onChange(of: focusValue) { _, val in
+                                                cameraManager.setLensPosition(val)
+                                            }
+                                        Image(systemName: "mountain.2")
+                                            .font(.caption)
+                                            .foregroundColor(.white)
+                                    }
+                                }
+
+                                // Torch
+                                if cameraManager.isTorchSupported {
+                                    HStack {
+                                        Image(systemName: "bolt.slash.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.white)
+                                        Slider(value: $torchValue, in: 0.0...1.0)
+                                            .tint(.white)
+                                            .onChange(of: torchValue) { _, val in
+                                                cameraManager.setTorchLevel(val)
+                                            }
+                                        Image(systemName: "bolt.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.yellow)
+                                    }
+                                }
+
+                                // Reset
+                                Button("Reset All") {
+                                    exposureValue = 0
+                                    whiteBalanceValue = 5500
+                                    focusValue = 0.5
+                                    torchValue = 0.0
+                                    cameraManager.resetSettings()
+                                }
+                                .font(.caption.bold())
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.yellow)
+                                .cornerRadius(8)
+                            }
+                            .padding(14)
+                            .background(
+                                .ultraThinMaterial,
+                                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                            )
+                            .shadow(color: Color.black.opacity(0.25), radius: 14, x: 0, y: 6)
+                            .padding(.horizontal)
+                            .zIndex(700)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                            Spacer()
+                        }
+                        .ignoresSafeArea()
+                        .zIndex(900)
+                    }
                 }
                 .navigationDestination(isPresented: $showMap) {
                     MapScreen(locationManager: locationManager, landmark: targetLandmarkBinding)
@@ -495,6 +703,7 @@ struct ContentView: View {
                 .sheet(isPresented: $showPhotoReview) {
                     PhotoReviewView()
                 }
+                .onPreferenceChange(_PreviewGlobalFrameKey.self) { previewGlobalFrame = $0 }
                 .onReceive(locationManager.$heading) { _ in
                     updateNavigationLogic(force: false)
                 }
@@ -506,6 +715,17 @@ struct ContentView: View {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) { thumbnailScale = 1.2 }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         withAnimation { thumbnailScale = 1.0 }
+                    }
+                }
+                .onChange(of: showFloatingAIHUD) { _, on in
+                    // When toggled on, default to the top-left corner of the camera preview.
+                    if on {
+                        floatingHUDOffset = .zero
+                    }
+                }
+                .onChange(of: cameraManager.isAIFeaturesEnabled) { _, isOn in
+                    if !isOn {
+                        showFloatingAIHUD = false
                     }
                 }
                 .onAppear {
@@ -596,13 +816,57 @@ struct ToggleButton: View {
                 Image(systemName: icon)
                 Text(label).font(.caption.bold())
             }
-            .foregroundColor(isOn ? .black : .white)
+            .foregroundColor(isOn ? .yellow : .white)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(isOn ? Color.yellow : Color.black.opacity(0.5))
-            .cornerRadius(10)
+            .background(
+                .ultraThinMaterial,
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(isOn ? Color.yellow.opacity(0.85) : Color.white.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.20), radius: 10, x: 0, y: 4)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Preferences
+
+private struct _TopBarGlobalFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+private struct _TopBarLeftWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct _TopBarRightWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct _PreviewGlobalFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+private struct _ViewSizePreferenceKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
     }
 }
 
