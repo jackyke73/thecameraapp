@@ -10,6 +10,7 @@ struct CameraAIOutput: Equatable {
     let peopleCount: Int
     let expressions: [String]
     let nosePoint: CGPoint?
+    let depthData: [[Float]]? // Normalized 0..1 depth map
 }
 
 final class RollingLabelBuffer {
@@ -39,6 +40,7 @@ final class CameraAIEngine {
     private let faceLandmarksRequest = VNDetectFaceLandmarksRequest()
     private let visionHandler = VNSequenceRequestHandler()
 
+    // Models
     private lazy var expressionModel: VNCoreMLModel? = {
         do {
             let config = MLModelConfiguration()
@@ -51,8 +53,20 @@ final class CameraAIEngine {
         }
     }()
 
+    private lazy var depthModel: VNCoreMLModel? = {
+        do {
+            let config = MLModelConfiguration()
+            config.computeUnits = .all
+            let coreML = try DepthAnythingV2SmallF16(configuration: config).model
+            return try VNCoreMLModel(for: coreML)
+        } catch {
+            print("⚠️ Failed to load DepthAnythingV2 model:", error)
+            return nil
+        }
+    }()
+
     private var frameCounter: Int = 0
-    private let detectEveryNFrames: Int = 2 // Reduced frequency for performance
+    private let detectEveryNFrames: Int = 2
     private var isBusy: Bool = false
     
     private let maxFacesToClassify: Int = 2
@@ -62,10 +76,10 @@ final class CameraAIEngine {
         isPersonDetected: false,
         peopleCount: 0,
         expressions: [],
-        nosePoint: nil
+        nosePoint: nil,
+        depthData: nil
     )
 
-    // Completion handler for async updates
     var onOutputUpdated: ((CameraAIOutput) -> Void)?
 
     func process(pixelBuffer: CVPixelBuffer,
@@ -78,11 +92,11 @@ final class CameraAIEngine {
         
         isBusy = true
         
-        // Background AI processing
         aiQueue.async { [weak self] in
             guard let self = self else { return }
             
             let output = autoreleasepool { () -> CameraAIOutput? in
+                // 1. Vision Analysis (Faces, Poses)
                 do {
                     try self.visionHandler.perform([self.poseRequest, self.faceRectRequest],
                                               on: pixelBuffer,
@@ -93,43 +107,31 @@ final class CameraAIEngine {
 
                 let poseObs = (self.poseRequest.results ?? [])
                 let faces = (self.faceRectRequest.results as? [VNFaceObservation]) ?? []
-
-                let poseCount = poseObs.count
-                let faceCount = faces.count
-                let peopleCount = max(poseCount, faceCount)
-                let isDetected = peopleCount > 0
-
-                let primaryFace = faces.max(by: { self.area($0.boundingBox) < self.area($1.boundingBox) })
+                let peopleCount = max(poseObs.count, faces.count)
 
                 var nosePoint: CGPoint? = nil
-                if let primaryFace {
-                    if let p = self.noseFromLandmarks(pixelBuffer: pixelBuffer,
-                                                 face: primaryFace,
-                                                 orientation: orientation,
-                                                 isMirrored: isMirrored) {
-                        nosePoint = p
-                    } else {
-                        nosePoint = self.noseFromBoundingBox(face: primaryFace,
-                                                        orientation: orientation,
-                                                        isMirrored: isMirrored)
-                    }
+                if let primaryFace = faces.max(by: { self.area($0.boundingBox) < self.area($1.boundingBox) }) {
+                    nosePoint = self.noseFromLandmarks(pixelBuffer: pixelBuffer, face: primaryFace, orientation: orientation, isMirrored: isMirrored) ??
+                                self.noseFromBoundingBox(face: primaryFace, orientation: orientation, isMirrored: isMirrored)
                 }
 
                 if nosePoint == nil, let firstPose = poseObs.first {
-                    nosePoint = self.noseFromBodyPose(pose: firstPose,
-                                                 orientation: orientation,
-                                                 isMirrored: isMirrored)
+                    nosePoint = self.noseFromBodyPose(pose: firstPose, orientation: orientation, isMirrored: isMirrored)
                 }
 
-                // Simplified expressions - classify every frame we process AI for now
-                let exprs = self.classifyExpressions(pixelBuffer: pixelBuffer,
-                                                faces: faces,
-                                                orientation: orientation)
+                let exprs = self.classifyExpressions(pixelBuffer: pixelBuffer, faces: faces, orientation: orientation)
 
-                return CameraAIOutput(isPersonDetected: isDetected,
+                // 2. Depth Analysis (Scenic Shot Suggestions)
+                var depthMap: [[Float]]? = nil
+                if let dModel = self.depthModel {
+                    depthMap = self.runDepthModel(model: dModel, pixelBuffer: pixelBuffer, orientation: orientation)
+                }
+
+                return CameraAIOutput(isPersonDetected: peopleCount > 0,
                                             peopleCount: peopleCount,
                                             expressions: exprs,
-                                            nosePoint: nosePoint)
+                                            nosePoint: nosePoint,
+                                            depthData: depthMap)
             }
 
             DispatchQueue.main.async {
@@ -142,82 +144,75 @@ final class CameraAIEngine {
         }
     }
 
-    // MARK: - Coordinate helpers (Native Conversion Preferred)
+    private func runDepthModel(model: VNCoreMLModel, 
+                               pixelBuffer: CVPixelBuffer, 
+                               orientation: CGImagePropertyOrientation) -> [[Float]]? {
+        let request = VNCoreMLRequest(model: model)
+        request.imageCropAndScaleOption = .centerCrop
+        
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
+        try? handler.perform([request])
+        
+        guard let observations = request.results as? [VNCoreMLFeatureValueObservation],
+              let multiArray = observations.first?.featureValue.multiArrayValue else { return nil }
+        
+        // Convert MLMultiArray to a simpler 2D array for the Swarm to work with
+        // DepthAnythingV2Small usually outputs something like 1x518x518 or similar
+        let rows = multiArray.shape[1].intValue
+        let cols = multiArray.shape[2].intValue
+        
+        var result = [[Float]](repeating: [Float](repeating: 0, count: cols), count: rows)
+        
+        for y in 0..<rows {
+            for x in 0..<cols {
+                let index = [0, y, x] as [NSNumber]
+                result[y][x] = multiArray[index].floatValue
+            }
+        }
+        
+        return result
+    }
+
+    // MARK: - Coordinate helpers (Native Conversion)
 
     private func visionToPreview(_ vision: CGPoint, orientation: CGImagePropertyOrientation, isMirrored: Bool) -> CGPoint {
-        // Vision: (0,0) is bottom-left
-        // UI: (0,0) is top-left
         var p = CGPoint(x: vision.x, y: 1.0 - vision.y)
-        
-        // Handle .right orientation (standard camera)
-        if orientation == .right {
-            p = CGPoint(x: 1.0 - p.y, y: p.x)
-        }
-        
-        if !isMirrored {
-            p.x = 1.0 - p.x
-            p.y = 1.0 - p.y
-        } else {
-            // Selfies are already mirrored horizontally by AVCapture
-        }
-        
+        if orientation == .right { p = CGPoint(x: 1.0 - p.y, y: p.x) }
+        if !isMirrored { p.x = 1.0 - p.x; p.y = 1.0 - p.y }
         return CGPoint(x: max(0, min(1, p.x)), y: max(0, min(1, p.y)))
     }
 
-    private func noseFromBoundingBox(face: VNFaceObservation,
-                                     orientation: CGImagePropertyOrientation,
-                                     isMirrored: Bool) -> CGPoint? {
+    private func noseFromBoundingBox(face: VNFaceObservation, orientation: CGImagePropertyOrientation, isMirrored: Bool) -> CGPoint? {
         let bb = face.boundingBox
-        let noseVision = CGPoint(x: bb.midX, y: bb.minY + bb.height * 0.60)
-        return visionToPreview(noseVision, orientation: orientation, isMirrored: isMirrored)
+        return visionToPreview(CGPoint(x: bb.midX, y: bb.minY + bb.height * 0.60), orientation: orientation, isMirrored: isMirrored)
     }
 
-    private func noseFromLandmarks(pixelBuffer: CVPixelBuffer,
-                                   face: VNFaceObservation,
-                                   orientation: CGImagePropertyOrientation,
-                                   isMirrored: Bool) -> CGPoint? {
-
+    private func noseFromLandmarks(pixelBuffer: CVPixelBuffer, face: VNFaceObservation, orientation: CGImagePropertyOrientation, isMirrored: Bool) -> CGPoint? {
         faceLandmarksRequest.inputFaceObservations = [face]
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
         try? handler.perform([faceLandmarksRequest])
-
-        guard let obs = faceLandmarksRequest.results?.first,
-              let landmarks = obs.landmarks,
+        guard let obs = faceLandmarksRequest.results?.first, let landmarks = obs.landmarks,
               let pts = landmarks.noseCrest?.normalizedPoints ?? landmarks.nose?.normalizedPoints,
               let tip = pts.max(by: { $0.y < $1.y }) else { return nil }
-
         let bb = obs.boundingBox
-        let visionX = bb.origin.x + tip.x * bb.size.width
-        let visionY = bb.origin.y + tip.y * bb.size.height
-
-        return visionToPreview(CGPoint(x: visionX, y: visionY), orientation: orientation, isMirrored: isMirrored)
+        return visionToPreview(CGPoint(x: bb.origin.x + tip.x * bb.size.width, y: bb.origin.y + tip.y * bb.size.height), orientation: orientation, isMirrored: isMirrored)
     }
 
-    private func noseFromBodyPose(pose: VNHumanBodyPoseObservation,
-                                  orientation: CGImagePropertyOrientation,
-                                  isMirrored: Bool) -> CGPoint? {
+    private func noseFromBodyPose(pose: VNHumanBodyPoseObservation, orientation: CGImagePropertyOrientation, isMirrored: Bool) -> CGPoint? {
         guard let nose = try? pose.recognizedPoint(.nose), nose.confidence > 0.2 else { return nil }
         return visionToPreview(nose.location, orientation: orientation, isMirrored: isMirrored)
     }
 
-    private func classifyExpressions(pixelBuffer: CVPixelBuffer,
-                                     faces: [VNFaceObservation],
-                                     orientation: CGImagePropertyOrientation) -> [String] {
-
+    private func classifyExpressions(pixelBuffer: CVPixelBuffer, faces: [VNFaceObservation], orientation: CGImagePropertyOrientation) -> [String] {
         guard let model = expressionModel, !faces.isEmpty else { return [] }
         let targets = Array(faces.sorted { area($0.boundingBox) > area($1.boundingBox) }.prefix(maxFacesToClassify))
-
         return targets.map { face in
             let request = VNCoreMLRequest(model: model)
             request.imageCropAndScaleOption = .centerCrop
             request.regionOfInterest = face.boundingBox
-
             let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
             try? handler.perform([request])
-
-            guard let obs = request.results as? [VNClassificationObservation],
-                  let top = obs.first else { return "Neutral" }
-            
+            guard let obs = request.results as? [VNClassificationObservation], let top = obs.first else { return "Neutral" }
             let normalized = normalizeLabel(top.identifier, confidence: top.confidence)
             let buf = labelBuffers[face.uuid] ?? RollingLabelBuffer(size: 7)
             buf.push(normalized)
@@ -236,7 +231,5 @@ final class CameraAIEngine {
         return "Neutral"
     }
 
-    private func area(_ bb: CGRect) -> CGFloat {
-        max(0, bb.width * bb.height)
-    }
+    private func area(_ bb: CGRect) -> CGFloat { max(0, bb.width * bb.height) }
 }
