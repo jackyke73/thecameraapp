@@ -7,6 +7,7 @@ import UIKit
 import CoreLocation
 import AudioToolbox
 import ImageIO
+import CoreMotion
 
 final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
 
@@ -18,6 +19,13 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published var targetPointInPreview: CGPoint? = nil
     @Published var isGuidanceActive: Bool = false
     @Published var isAligned: Bool = false
+    
+    // Leveler Guidance
+    @Published var deviceRoll: Double = 0.0
+    @Published var devicePitch: Double = 0.0
+    @Published var isLevel: Bool = false
+    private let motionManager = CMMotionManager()
+    private var hasHapticPlayedForLevel = false
     
     // Guidance (normalized 0...1 in preview space)
     @Published var nosePoint: CGPoint? = nil
@@ -83,10 +91,51 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         super.init()
         configureOutputs()
         checkPermissions()
+        startMotionUpdates()
     }
 
     deinit {
         primaryConstituentObservation = nil
+        motionManager.stopDeviceMotionUpdates()
+    }
+
+    private func startMotionUpdates() {
+        guard motionManager.isDeviceMotionAvailable else { return }
+        motionManager.deviceMotionUpdateInterval = 0.1
+        motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
+            guard let self = self, let motion = motion else { return }
+            
+            // Roll: Rotation around the longitudinal axis (tilting left/right)
+            // Pitch: Rotation around the lateral axis (tilting forward/back)
+            
+            // Adjust for portrait orientation
+            // Calculate angle in radians from gravity vector
+            let angle = atan2(motion.gravity.x, motion.gravity.y) + .pi
+            
+            // Threshold for "Level" (approx 1 degree = 0.017 rad)
+            // We care about 0 (Portrait) and PI (Upside down, though less likely)
+            // atan2 returns -PI to PI.
+            
+            // Normalize to -PI to PI
+            var rotation = angle
+            if rotation > .pi { rotation -= 2 * .pi }
+            
+            let threshold = 0.02
+            let isHorizonLevel = abs(rotation) < threshold
+            
+            self.deviceRoll = rotation // This is now actual rotation in radians
+            self.devicePitch = motion.gravity.z
+            self.isLevel = isHorizonLevel
+            
+            if isHorizonLevel {
+                if !self.hasHapticPlayedForLevel {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    self.hasHapticPlayedForLevel = true
+                }
+            } else {
+                self.hasHapticPlayedForLevel = false
+            }
+        }
     }
 
     private func configureOutputs() {

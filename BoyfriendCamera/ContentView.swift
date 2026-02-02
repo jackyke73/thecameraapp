@@ -45,6 +45,7 @@ struct ContentView: View {
     @State private var torchValue: Float = 0.0
 
     @State private var isGridEnabled = false
+    @State private var isLevelerEnabled = true
     @State private var isTimerEnabled = false
 
     // ✅ Top bar measurements (for collision-avoidance + bounding)
@@ -138,6 +139,14 @@ struct ContentView: View {
                                     GridOverlay()
                                         .stroke(Color.white.opacity(0.3), lineWidth: 1)
                                         .frame(width: width, height: targetHeight)
+                                }
+                                
+                                if isLevelerEnabled {
+                                    LevelerOverlay(
+                                        rotation: cameraManager.deviceRoll,
+                                        isLevel: cameraManager.isLevel
+                                    )
+                                    .frame(width: width, height: targetHeight)
                                 }
                             }
 
@@ -549,6 +558,7 @@ struct ContentView: View {
                                 // Toggles row 1
                                 HStack(spacing: 12) {
                                     ToggleButton(icon: "grid", label: "Grid", isOn: $isGridEnabled)
+                                    ToggleButton(icon: "gyroscope", label: "Level", isOn: $isLevelerEnabled)
                                     ToggleButton(icon: "timer", label: "3s Timer", isOn: $isTimerEnabled)
                                 }
 
