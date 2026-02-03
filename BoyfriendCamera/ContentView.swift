@@ -135,6 +135,23 @@ struct ContentView: View {
                                     isAligned: cameraManager.isAligned
                                 )
 
+                                // ✅ Sun / light direction guidance (uses location + heading)
+                                if cameraManager.isAIFeaturesEnabled {
+                                    VStack {
+                                        HStack {
+                                            Spacer()
+                                            SunGuidanceOverlay(
+                                                location: locationManager.location,
+                                                heading: locationManager.heading,
+                                                isInterferenceHigh: locationManager.isInterferenceHigh
+                                            )
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.top, 10)
+                                    .padding(.trailing, 10)
+                                }
+
                                 if isGridEnabled {
                                     GridOverlay()
                                         .stroke(Color.white.opacity(0.3), lineWidth: 1)

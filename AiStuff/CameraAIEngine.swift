@@ -57,7 +57,17 @@ final class CameraAIEngine {
         do {
             let config = MLModelConfiguration()
             config.computeUnits = .all
-            let coreML = try DepthAnythingV2SmallF16(configuration: config).model
+
+            // Prefer compiled model if present; fall back to packaged resource.
+            let url = Bundle.main.url(forResource: "DepthAnythingV2SmallF16", withExtension: "mlmodelc")
+                ?? Bundle.main.url(forResource: "DepthAnythingV2SmallF16", withExtension: "mlpackage")
+
+            guard let modelURL = url else {
+                print("⚠️ DepthAnythingV2 model resource not found in app bundle")
+                return nil
+            }
+
+            let coreML = try MLModel(contentsOf: modelURL, configuration: config)
             return try VNCoreMLModel(for: coreML)
         } catch {
             print("⚠️ Failed to load DepthAnythingV2 model:", error)

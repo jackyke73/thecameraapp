@@ -574,11 +574,10 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         // IMPORTANT: don't let the engine mirror; we do it once here
         let previewIsMirrored = (currentPosition == .front)
 
-        if let out = aiEngine.process(pixelBuffer: pixelBuffer,
-                                      orientation: .right,
-                                      isMirrored: previewIsMirrored) {
-
-            DispatchQueue.main.async {
+        // Bind callback once; engine runs asynchronously.
+        if aiEngine.onOutputUpdated == nil {
+            aiEngine.onOutputUpdated = { [weak self] out in
+                guard let self = self else { return }
                 self.isPersonDetected = out.isPersonDetected
                 self.peopleCount = out.peopleCount
                 self.expressions = out.expressions
@@ -606,6 +605,10 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 }
             }
         }
+
+        aiEngine.process(pixelBuffer: pixelBuffer,
+                         orientation: .right,
+                         isMirrored: previewIsMirrored)
     }
 
     // MARK: - Focus Tap
