@@ -98,6 +98,21 @@ struct ContentView: View {
         let y = min(max(minYOffset, proposed.height), maxY)
         return CGSize(width: x, height: y)
     }
+    
+    // ✅ Computed Instruction for the Smart Director
+    private var currentInstruction: DirectorInstruction {
+        guard cameraManager.isAIFeaturesEnabled else { return .none }
+        return DirectorLogic.determineInstruction(
+            isPersonDetected: cameraManager.isPersonDetected,
+            peopleCount: cameraManager.peopleCount,
+            nosePoint: cameraManager.nosePoint,
+            targetPoint: cameraManager.targetPoint,
+            deviceRoll: cameraManager.deviceRoll,
+            isLevel: cameraManager.isLevel,
+            expressions: cameraManager.expressions
+        )
+    }
+
     // Zoom gesture start
     @State private var startZoomValue: CGFloat = 1.0
 
@@ -313,6 +328,22 @@ struct ContentView: View {
                     if isLandmarkLockEnabled, let advice = currentAdvice {
                         FloatingTargetView(angleDiff: advice.turnAngle, isLocked: abs(advice.turnAngle) < 3)
                             .zIndex(50)
+                    }
+
+                    // ✅ Smart Director Overlay
+                    if cameraManager.isAIFeaturesEnabled {
+                         VStack {
+                             // Place it slightly below the top bar area (approx 100pt if frame not ready)
+                             Spacer()
+                                 .frame(height: max(100, topBarGlobalFrame.maxY + 10))
+                             
+                             DirectorOverlay(instruction: currentInstruction)
+                             
+                             Spacer()
+                         }
+                         .zIndex(60)
+                         .allowsHitTesting(false)
+                         .animation(.easeInOut, value: currentInstruction)
                     }
 
                     // 4) UI CONTROLS
