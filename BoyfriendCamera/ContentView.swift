@@ -201,7 +201,7 @@ struct ContentView: View {
                                     minYOffset: minYOffset
                                 )
 
-                                AIDebugHUD(cameraManager: cameraManager, compact: false, isInteractive: true)
+                                SmartDirectorHUD(cameraManager: cameraManager, compact: false, isInteractive: true)
                                     .background(
                                         GeometryReader { proxy in
                                             Color.clear
@@ -434,7 +434,7 @@ struct ContentView: View {
                             if cameraManager.isAIFeaturesEnabled {
                                 let available = max(0, outerGeo.size.width - topBarLeftWidth - topBarRightWidth - 2 * 16)
                                 if available > 140 {
-                                    AIDebugHUD(cameraManager: cameraManager, compact: true)
+                                    SmartDirectorHUD(cameraManager: cameraManager, compact: true)
                                         .frame(maxWidth: available)
                                         .padding(.top, 2)
                                         .allowsHitTesting(false)

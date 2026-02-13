@@ -82,6 +82,9 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     // ✅ AI engine
     private let aiEngine = CameraAIEngine()
+    private let semanticEngine = SemanticDirectorEngine()
+    private var frameCounter = 0
+    @Published var semanticAnalysis: SemanticFrameAnalysis = .empty
 
     // ✅ The preview layer reference (set by CameraPreview)
     weak var previewLayer: AVCaptureVideoPreviewLayer?
@@ -609,6 +612,20 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         aiEngine.process(pixelBuffer: pixelBuffer,
                          orientation: .right,
                          isMirrored: previewIsMirrored)
+        // 2. Semantic Analysis (Mock VLM) - Every ~30 frames (approx 1s)
+        self.frameCounter += 1
+        if self.frameCounter % 30 == 0 {
+            Task {
+                do {
+                    let analysis = try await self.semanticEngine.analyze(pixelBuffer: pixelBuffer)
+                    await MainActor.run {
+                        self.semanticAnalysis = analysis
+                    }
+                } catch {
+                    print("Semantic Analysis Failed: \(error)")
+                }
+            }
+        }
     }
 
     // MARK: - Focus Tap
