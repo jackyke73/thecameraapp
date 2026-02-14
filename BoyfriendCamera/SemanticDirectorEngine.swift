@@ -1,6 +1,8 @@
 import Foundation
 import CoreVideo
 import Combine
+import Vision
+import CoreImage
 
 // Represents the output of a VLM or advanced semantic analysis model
 struct SemanticFrameAnalysis: Equatable, Sendable {
@@ -26,58 +28,103 @@ enum LightingQuality: String, Sendable {
     case good = "Good"
     case goldenHour = "Golden Hour"
     case studio = "Studio Quality"
+    case tooBright = "Overexposed"
 }
 
-// Service to run semantic inference (VLM / MobileVLM mock)
+// Service to run semantic inference (VLM / MobileVLM mock + Vision Analysis)
 actor SemanticDirectorEngine {
     
     // Simulate inference time
-    private let inferenceDuration: TimeInterval = 0.8 // 800ms for a small VLM
+    private let inferenceDuration: TimeInterval = 0.1 // Fast Vision loop (100ms)
     
-    // In a real app, this would hold the model (e.g., LLaVA, MobileVLM, or CoreML wrapper)
-    // private var model: VLMModel?
+    // Vision Service
+    private let visionService: VisionAnalysisService
     
     init() {
-        // Load model resources (mock)
-        print("SemanticDirectorEngine: Initializing VLM resources...")
+        print("SemanticDirectorEngine: Initializing Vision resources...")
+        self.visionService = VisionAnalysisService()
     }
     
+    // State for temporal smoothing to prevent flicker
+    private var lastLightingQuality: LightingQuality = .unknown
+    private var lightingStabilityCount: Int = 0
+    private let stabilityThreshold: Int = 2 // Require 2 consecutive frames for a change
+
     func analyze(pixelBuffer: CVPixelBuffer) async throws -> SemanticFrameAnalysis {
-        // In a real implementation:
-        // 1. Resize/Normalize pixelBuffer
-        // 2. Run inference
-        // 3. Decode tokens -> Text
+        // Run Vision analysis
+        let visionResult = visionService.analyze(pixelBuffer: pixelBuffer)
         
-        // Mocking the behavior for the MVP/Prototype
-        // We vary the output based on random chance to simulate dynamic scene changes for the demo
+        // --- 1. Lighting Analysis (Heuristic via PixelBuffer metadata or simple stats) ---
+        // For MVP, we'll estimate brightness from the Y-plane if possible, or just mock based on time.
+        // TODO: Implement true histogram analysis. For now, we simulate "Good" unless extreme.
+        let detectedLighting: LightingQuality = .good 
+
+        // --- 2. Composition Logic (The "Director") ---
+        var suggestion: String? = nil
+        var score: Double = 0.5
+        var description = "Scene"
         
-        try await Task.sleep(nanoseconds: UInt64(inferenceDuration * 1_000_000_000))
+        if let result = visionResult {
+            if result.faceCount == 0 {
+                description = "Landscape / Object"
+                suggestion = "Find a subject!"
+                score = 0.3
+            } else if result.faceCount == 1 {
+                description = "Portrait"
+                if let face = result.mainFaceBounds {
+                    let faceArea = face.width * face.height
+                    // Face coordinates are normalized (0.0 to 1.0)
+                    
+                    if faceArea < 0.05 {
+                        suggestion = "Move closer!"
+                        score = 0.4
+                    } else if faceArea > 0.6 {
+                        suggestion = "Back up a bit!"
+                        score = 0.4
+                    } else {
+                        // Check centering (Rule of Thirds-ish)
+                        let centerX = face.midX
+                        if centerX < 0.4 {
+                            suggestion = "Pan Right ->"
+                            score = 0.6
+                        } else if centerX > 0.6 {
+                            suggestion = "<- Pan Left"
+                            score = 0.6
+                        } else {
+                            suggestion = "Perfect! Hold it."
+                            score = 0.95
+                        }
+                    }
+                }
+            } else {
+                description = "Group Shot (\(result.faceCount))"
+                suggestion = "Squeeze in closer!"
+                score = 0.7
+            }
+        }
         
-        let randomScore = Double.random(in: 0.4...0.95)
-        let isGoldenHour = Bool.random() // simulate detected lighting
-        let clutter = Bool.random()
-        
-        let suggestions = [
-            "Try a lower angle for a heroic look.",
-            "Step closer to fill the frame.",
-            "Great symmetry! Hold it.",
-            "Wait for the background person to move.",
-            "Rule of thirds: Move subject slightly right."
-        ]
-        
-        let descriptions = [
-            "A person smiling in a park.",
-            "A busy street scene with a subject in focus.",
-            "Indoor portrait with soft lighting.",
-            "A candid moment captured."
-        ]
-        
+        // Temporal Smoothing for Lighting
+        let finalLighting: LightingQuality
+        if detectedLighting == lastLightingQuality {
+            lightingStabilityCount += 1
+            finalLighting = detectedLighting
+        } else {
+            if lightingStabilityCount >= stabilityThreshold {
+                lastLightingQuality = detectedLighting
+                lightingStabilityCount = 0
+                finalLighting = detectedLighting
+            } else {
+                lightingStabilityCount += 1
+                finalLighting = lastLightingQuality
+            }
+        }
+
         return SemanticFrameAnalysis(
-            sceneDescription: descriptions.randomElement() ?? "Scene",
-            lightingQuality: isGoldenHour ? .goldenHour : (randomScore > 0.8 ? .good : .poor),
-            compositionScore: randomScore,
-            creativeSuggestion: suggestions.randomElement(),
-            clutterDetected: clutter
+            sceneDescription: description,
+            lightingQuality: finalLighting,
+            compositionScore: score,
+            creativeSuggestion: suggestion,
+            clutterDetected: false // TODO: Use segmentation mask ratio
         )
     }
 }

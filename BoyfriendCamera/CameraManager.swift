@@ -83,8 +83,11 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     // ✅ AI engine
     private let aiEngine = CameraAIEngine()
     private let semanticEngine = SemanticDirectorEngine()
+    private let agentic3DEngine = Agentic3DEngine()
     private var frameCounter = 0
     @Published var semanticAnalysis: SemanticFrameAnalysis = .empty
+    @Published var splatObjects: [SplatObject] = []
+    @Published var recommended3DActions: [SplatAction] = []
 
     // ✅ The preview layer reference (set by CameraPreview)
     weak var previewLayer: AVCaptureVideoPreviewLayer?
@@ -566,63 +569,59 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     }
 
     // MARK: - Vision (AI)
-    // MARK: - Vision (AI)
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
 
         guard isAIFeaturesEnabled else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        // IMPORTANT: don't let the engine mirror; we do it once here
-        let previewIsMirrored = (currentPosition == .front)
-
-        // Bind callback once; engine runs asynchronously.
-        if aiEngine.onOutputUpdated == nil {
-            aiEngine.onOutputUpdated = { [weak self] out in
-                guard let self = self else { return }
-                self.isPersonDetected = out.isPersonDetected
-                self.peopleCount = out.peopleCount
-                self.expressions = out.expressions
-
-                if let p = out.nosePoint {
-                    self.nosePoint = p
-                    self.lastNoseSeenAt = Date()
-                } else {
-                    // don't instantly erase; hold briefly
-                    if Date().timeIntervalSince(self.lastNoseSeenAt) > self.noseHoldSeconds {
-                        self.nosePoint = nil
-                    }
-                }
-
-                if let nose = self.nosePoint {
-                    let dx = nose.x - self.targetPoint.x
-                    let dy = nose.y - self.targetPoint.y
-                    let dist = sqrt(dx*dx + dy*dy)
-
-                    self.isAligned = dist <= 0.035
-                    self.isGuidanceActive = !self.isAligned
-                } else {
-                    self.isAligned = false
-                    self.isGuidanceActive = false
-                }
-            }
-        }
-
-        aiEngine.process(pixelBuffer: pixelBuffer,
-                         orientation: .right,
-                         isMirrored: previewIsMirrored)
-        // 2. Semantic Analysis (Mock VLM) - Every ~30 frames (approx 1s)
+        
         self.frameCounter += 1
-        if self.frameCounter % 30 == 0 {
+
+        // 1. Core AI (Face/Body - fast) - Every 3rd frame (20fps effective)
+        if self.frameCounter % 3 == 0 {
+             // IMPORTANT: don't let the engine mirror; we do it once here
+             let previewIsMirrored = (currentPosition == .front)
+             
+             // Bind callback once; engine runs asynchronously.
+             if aiEngine.onOutputUpdated == nil {
+                 aiEngine.onOutputUpdated = { [weak self] out in
+                     guard let self = self else { return }
+                     self.isPersonDetected = out.isPersonDetected
+                     self.peopleCount = out.peopleCount
+                     self.expressions = out.expressions
+
+                     if let p = out.nosePoint {
+                         self.nosePoint = p
+                         self.lastNoseSeenAt = Date()
+                     } else {
+                         // don't instantly erase; hold briefly
+                         if Date().timeIntervalSince(self.lastNoseSeenAt) > self.noseHoldSeconds {
+                             self.nosePoint = nil
+                         }
+                     }
+                 }
+             }
+
+             aiEngine.process(pixelBuffer: pixelBuffer,
+                              orientation: .right,
+                              isMirrored: previewIsMirrored)
+        }
+        
+        // 2. Semantic Analysis (Vision + Heuristics) - Every 10 frames (3fps effective)
+        // More frequent now that it's using fast Vision, not sleeping for 800ms
+        if self.frameCounter % 10 == 0 {
             Task {
                 do {
+                    // Start Semantic Analysis
                     let analysis = try await self.semanticEngine.analyze(pixelBuffer: pixelBuffer)
+                    
+                    // Update UI on Main Actor
                     await MainActor.run {
                         self.semanticAnalysis = analysis
                     }
                 } catch {
-                    print("Semantic Analysis Failed: \(error)")
+                    print("AI Processing Failed: \(error)")
                 }
             }
         }
