@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct SemanticGuidanceView: View {
-    let analysis: SemanticFrameAnalysis
+    @ObservedObject var cameraManager: CameraManager
+    var analysis: SemanticFrameAnalysis { cameraManager.semanticAnalysis }
     
     @State private var animatePulse: Bool = false
     
@@ -82,6 +83,28 @@ struct SemanticGuidanceView: View {
                         .cornerRadius(4)
                 }
             }
+            
+            // 3D Agentic Insights (New)
+            if !cameraManager.recommended3DActions.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Divider().background(Color.white.opacity(0.2))
+                    Text("3D SPATIAL ADVISOR")
+                        .font(.system(size: 8, weight: .black))
+                        .foregroundColor(.blue)
+                    
+                    ForEach(cameraManager.recommended3DActions, id: \.targetId) { action in
+                        HStack(spacing: 4) {
+                            Image(systemName: "move.3d")
+                                .font(.system(size: 10))
+                                .foregroundColor(.blue)
+                            Text(action.actionDescription)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
         }
         .padding(12)
         .background(
@@ -118,13 +141,7 @@ struct SemanticGuidanceView_Previews: PreviewProvider {
     static var previews: some View {
         ZStack {
             Color.black
-            SemanticGuidanceView(analysis: SemanticFrameAnalysis(
-                sceneDescription: "Test scene",
-                lightingQuality: .goldenHour,
-                compositionScore: 0.85,
-                creativeSuggestion: "Tilt slightly up to capture the sky.",
-                clutterDetected: false
-            ))
+            SemanticGuidanceView(cameraManager: CameraManager())
             .padding()
         }
     }

@@ -32,6 +32,7 @@ struct DirectorLogic {
         isPersonDetected: Bool,
         peopleCount: Int,
         nosePoint: CGPoint?,
+        faceBounds: CGRect?,
         targetPoint: CGPoint,
         deviceRoll: Double,
         isLevel: Bool,
@@ -55,7 +56,19 @@ struct DirectorLogic {
             return DirectorInstruction(text: "Find your Subject", icon: "person.fill.viewfinder", color: .yellow, priority: .high)
         }
         
-        // 3. Framing: Center the subject (using nose point)
+        // 3. Distance: Check Face Size
+        if let face = faceBounds {
+            let faceWidth = face.width
+            // Vision coordinates are normalized (0.0 to 1.0)
+            
+            if faceWidth < 0.15 {
+                return DirectorInstruction(text: "Move Closer", icon: "arrow.up.left.and.arrow.down.right", color: .orange, priority: .medium)
+            } else if faceWidth > 0.6 {
+                return DirectorInstruction(text: "Back Up", icon: "arrow.down.right.and.arrow.up.left", color: .orange, priority: .medium)
+            }
+        }
+        
+        // 4. Framing: Center the subject (using nose point)
         if let nose = nosePoint {
             let dx = nose.x - targetPoint.x
             let dy = nose.y - targetPoint.y // Remember Y might be inverted depending on view, but magnitude is safe

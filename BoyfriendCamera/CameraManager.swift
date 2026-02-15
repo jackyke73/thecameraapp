@@ -36,6 +36,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published var isPersonDetected = false
     @Published var peopleCount: Int = 0
     @Published var expressions: [String] = []
+    @Published var mainFaceBounds: CGRect? = nil // Normalized Vision rect
     private var lastNoseSeenAt: Date = .distantPast
     private let noseHoldSeconds: TimeInterval = 0.4
 
@@ -590,6 +591,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                      self.isPersonDetected = out.isPersonDetected
                      self.peopleCount = out.peopleCount
                      self.expressions = out.expressions
+                     self.mainFaceBounds = out.mainFaceBounds
 
                      if let p = out.nosePoint {
                          self.nosePoint = p

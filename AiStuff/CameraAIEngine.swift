@@ -10,6 +10,7 @@ struct CameraAIOutput: Equatable {
     let peopleCount: Int
     let expressions: [String]
     let nosePoint: CGPoint?
+    let mainFaceBounds: CGRect? // Normalized 0..1 coordinates
     let depthData: [[Float]]? // Normalized 0..1 depth map
 }
 
@@ -87,6 +88,7 @@ final class CameraAIEngine {
         peopleCount: 0,
         expressions: [],
         nosePoint: nil,
+        mainFaceBounds: nil,
         depthData: nil
     )
 
@@ -120,12 +122,27 @@ final class CameraAIEngine {
                 let peopleCount = max(poseObs.count, faces.count)
 
                 var nosePoint: CGPoint? = nil
-                if let primaryFace = faces.max(by: { self.area($0.boundingBox) < self.area($1.boundingBox) }) {
+                var mainFaceBounds: CGRect? = nil
+                
+                if let primaryFace = faces.max(by: { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height }) {
+                    // Vision bounding boxes are normalized (0..1), usually bottom-left origin
+                    mainFaceBounds = primaryFace.boundingBox 
+                    
+                    // We need to transform the nose point to preview space
+                    // We also want to provide the bounding box in preview space if possible, 
+                    // but for now let's just pass the raw Vision bounds and let CameraManager handle coordinate conversion if needed?
+                    // No, let's keep it raw Vision (0..1) and let DirectorLogic interpret it.
+                    
                     nosePoint = self.noseFromLandmarks(pixelBuffer: pixelBuffer, face: primaryFace, orientation: orientation, isMirrored: isMirrored) ??
                                 self.noseFromBoundingBox(face: primaryFace, orientation: orientation, isMirrored: isMirrored)
                 }
 
                 if nosePoint == nil, let firstPose = poseObs.first {
+                    // Fallback to body pose if no face found but body is
+                    // Can we estimate bounds from body pose? 
+                    // Body pose bounding box is available.
+                    // mainFaceBounds = firstPose.boundingBox (This is body bounds, not face)
+                    // Let's stick to face bounds for "Move Closer" logic for now.
                     nosePoint = self.noseFromBodyPose(pose: firstPose, orientation: orientation, isMirrored: isMirrored)
                 }
 
@@ -141,6 +158,7 @@ final class CameraAIEngine {
                                             peopleCount: peopleCount,
                                             expressions: exprs,
                                             nosePoint: nosePoint,
+                                            mainFaceBounds: mainFaceBounds,
                                             depthData: depthMap)
             }
 

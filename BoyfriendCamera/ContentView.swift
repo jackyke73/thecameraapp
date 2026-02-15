@@ -106,6 +106,7 @@ struct ContentView: View {
             isPersonDetected: cameraManager.isPersonDetected,
             peopleCount: cameraManager.peopleCount,
             nosePoint: cameraManager.nosePoint,
+            faceBounds: cameraManager.mainFaceBounds,
             targetPoint: cameraManager.targetPoint,
             deviceRoll: cameraManager.deviceRoll,
             isLevel: cameraManager.isLevel,

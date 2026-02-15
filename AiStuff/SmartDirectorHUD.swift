@@ -54,7 +54,7 @@ struct SmartDirectorHUD: View {
                     .padding()
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 } else {
-                    SemanticGuidanceView(analysis: cameraManager.semanticAnalysis)
+                    SemanticGuidanceView(cameraManager: cameraManager)
                 }
             }
         }
