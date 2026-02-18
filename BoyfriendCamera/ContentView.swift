@@ -47,6 +47,8 @@ struct ContentView: View {
     @State private var isGridEnabled = false
     @State private var isLevelerEnabled = true
     @State private var isTimerEnabled = false
+    @State private var isHapticEnabled = true // Default ON for the "Director" feel
+    @State private var isVoiceEnabled = true // Default ON for Agentic Voice Guidance
 
     // ✅ Top bar measurements (for collision-avoidance + bounding)
     @State private var topBarGlobalFrame: CGRect = .zero
@@ -609,6 +611,13 @@ struct ContentView: View {
                                     ToggleButton(icon: "grid", label: "Grid", isOn: $isGridEnabled)
                                     ToggleButton(icon: "gyroscope", label: "Level", isOn: $isLevelerEnabled)
                                     ToggleButton(icon: "timer", label: "3s Timer", isOn: $isTimerEnabled)
+                                    ToggleButton(icon: "waveform.path.ecg", label: "Haptic", isOn: $isHapticEnabled)
+                                }
+                                
+                                // Toggles row 1.5 (Agentic)
+                                HStack(spacing: 12) {
+                                     ToggleButton(icon: "waveform.circle", label: "Voice", isOn: $isVoiceEnabled)
+                                     Spacer()
                                 }
 
                                 // Toggles row 2
@@ -623,6 +632,9 @@ struct ContentView: View {
                                         }
 
                                     ToggleButton(icon: "sparkles", label: "AI", isOn: $cameraManager.isAIFeaturesEnabled)
+                                    
+                                    // Smart Shutter Toggle
+                                    ToggleButton(icon: "camera.shutter.button.fill", label: "Auto", isOn: $cameraManager.isSmartShutterEnabled)
                                 }
 
                                 // Floating AI HUD toggle
@@ -766,14 +778,27 @@ struct ContentView: View {
                 .onReceive(locationManager.$heading) { _ in
                     updateNavigationLogic(force: false)
                 }
-                .onReceive(locationManager.$location) { _ in
+                .onReceive(locationManager.$location) { loc in
                     updateNavigationLogic(force: false)
+                    cameraManager.currentLocation = loc
+                }
+                .onChange(of: currentAspectRatio) { _, ratio in
+                    cameraManager.currentAspectRatioValue = ratio.value
                 }
                 .onReceive(cameraManager.captureDidFinish) { _ in
                     withAnimation(.easeInOut(duration: 0.1)) { isCapturing = false }
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) { thumbnailScale = 1.2 }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         withAnimation { thumbnailScale = 1.0 }
+                    }
+                }
+                .onChange(of: currentInstruction) { _, instr in
+                    if isHapticEnabled {
+                        HapticDirectorEngine.shared.play(instr.haptic)
+                    }
+                    
+                    if isVoiceEnabled {
+                        VoiceDirectorEngine.shared.speak(instr.text, priority: instr.priority)
                     }
                 }
                 .onChange(of: showFloatingAIHUD) { _, on in
@@ -789,6 +814,8 @@ struct ContentView: View {
                 }
                 .onAppear {
                     updateNavigationLogic(force: true)
+                    cameraManager.currentLocation = locationManager.location
+                    cameraManager.currentAspectRatioValue = currentAspectRatio.value
                 }
             }
         }
