@@ -129,10 +129,16 @@ struct SemanticGuidanceView: View {
     
     private func lightingColor(_ quality: LightingQuality) -> Color {
         switch quality {
-        case .goldenHour: return .orange
-        case .good, .studio: return .green
-        case .poor, .harsh: return .red
-        case .unknown: return .gray
+        case .goldenHour:
+            return .orange
+        case .good, .studio:
+            return .green
+        case .poor, .harsh:
+            return .red
+        case .unknown:
+            return .gray
+        @unknown default:
+            return .gray
         }
     }
 }

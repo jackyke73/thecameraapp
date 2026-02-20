@@ -54,10 +54,20 @@ actor SemanticDirectorEngine {
         // Run Vision analysis
         let visionResult = visionService.analyze(pixelBuffer: pixelBuffer)
         
-        // --- 1. Lighting Analysis (Heuristic via PixelBuffer metadata or simple stats) ---
-        // For MVP, we'll estimate brightness from the Y-plane if possible, or just mock based on time.
-        // TODO: Implement true histogram analysis. For now, we simulate "Good" unless extreme.
-        let detectedLighting: LightingQuality = .good 
+        // --- 1. Lighting Analysis (Heuristic from Luma) ---
+        var detectedLighting: LightingQuality = .unknown
+        if let result = visionResult {
+            let b = result.brightness
+            if b < 0.25 {
+                detectedLighting = .poor
+            } else if b > 0.85 {
+                detectedLighting = .tooBright
+            } else if b > 0.6 && b < 0.8 {
+                detectedLighting = .good // "Studio" range roughly
+            } else {
+                detectedLighting = .good
+            }
+        }
 
         // --- 2. Composition Logic (The "Director") ---
         var suggestion: String? = nil

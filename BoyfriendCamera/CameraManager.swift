@@ -39,11 +39,20 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     @Published var mainFaceBounds: CGRect? = nil // Normalized Vision rect
     private var lastNoseSeenAt: Date = .distantPast
     private let noseHoldSeconds: TimeInterval = 0.4
+    
+    // Updated continuously by ContentView via binding/setter
+    @Published var currentAspectRatioValue: CGFloat = 4.0/3.0
+    @Published var currentLocation: CLLocation? = nil
+    
+    // Smart Shutter
+    @Published var isSmartShutterEnabled: Bool = false
+    private var lastSmartShutterTime: Date = .distantPast
+    private let smartShutterCooldown: TimeInterval = 3.0
 
     // ✅ draw-ready nose point in preview coordinates (points)
 
     @Published var capturedImage: UIImage?
-
+    
     // Capabilities
     @Published var isWBSupported: Bool = false
     @Published var isFocusSupported: Bool = false
@@ -84,11 +93,15 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     // ✅ AI engine
     private let aiEngine = CameraAIEngine()
     private let semanticEngine = SemanticDirectorEngine()
+    private let yoloEngine = YOLOv8DirectorEngine() // Sovereign AI
     private let agentic3DEngine = Agentic3DEngine()
     private var frameCounter = 0
     @Published var semanticAnalysis: SemanticFrameAnalysis = .empty
     @Published var splatObjects: [SplatObject] = []
     @Published var recommended3DActions: [SplatAction] = []
+    
+    // Sovereign AI State
+    @Published var yoloCommand: String = ""
 
     // ✅ The preview layer reference (set by CameraPreview)
     weak var previewLayer: AVCaptureVideoPreviewLayer?
@@ -360,6 +373,24 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             performCapture(location: location, ratio: aspectRatioValue)
         }
     }
+    
+    // Internal method to handle Smart Shutter trigger
+    private func triggerSmartShutter() {
+        guard isSmartShutterEnabled else { return }
+        
+        // Cooldown Check
+        let now = Date()
+        guard now.timeIntervalSince(lastSmartShutterTime) > smartShutterCooldown else { return }
+        
+        lastSmartShutterTime = now
+        
+        // Haptic Feedback
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+        
+        // Capture using latest known values
+        capturePhoto(location: currentLocation, aspectRatioValue: currentAspectRatioValue, useTimer: false)
+    }
 
     private func performCapture(location: CLLocation?, ratio: CGFloat) {
         AudioServicesPlaySystemSound(1108)
@@ -621,11 +652,31 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     // Update UI on Main Actor
                     await MainActor.run {
                         self.semanticAnalysis = analysis
+                        
+                        // Smart Shutter Logic
+                        if self.isSmartShutterEnabled &&
+                           self.isPersonDetected &&
+                           self.isLevel &&
+                           analysis.compositionScore >= 0.85 &&
+                           analysis.lightingQuality != .poor {
+                            
+                            self.triggerSmartShutter()
+                        }
                     }
                 } catch {
                     print("AI Processing Failed: \(error)")
                 }
             }
+        }
+        
+        // 3. YOLOv8 Analysis (Sovereign AI) - Every 5 frames (12fps effective)
+        if self.frameCounter % 5 == 0 {
+             yoloEngine.analyze(pixelBuffer: pixelBuffer)
+             
+             // Sync YOLO command to published property (it's already on main thread in engine)
+             DispatchQueue.main.async {
+                 self.yoloCommand = self.yoloEngine.directorCommand
+             }
         }
     }
 

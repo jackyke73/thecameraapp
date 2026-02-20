@@ -46,9 +46,9 @@ struct DirectorOverlay_Previews: PreviewProvider {
         ZStack {
             Color.black
             VStack(spacing: 20) {
-                DirectorOverlay(instruction: DirectorInstruction(text: "Tilt Left", icon: "rotate.left.fill", color: .red, priority: .critical))
-                DirectorOverlay(instruction: DirectorInstruction(text: "Perfect! Shoot!", icon: "star.fill", color: .green, priority: .high))
-                DirectorOverlay(instruction: DirectorInstruction(text: "Make her laugh!", icon: "face.smiling", color: .blue, priority: .medium))
+                DirectorOverlay(instruction: DirectorInstruction(text: "Tilt Left", icon: "rotate.left.fill", color: .red, priority: .critical, haptic: .none))
+                DirectorOverlay(instruction: DirectorInstruction(text: "Perfect! Shoot!", icon: "star.fill", color: .green, priority: .high, haptic: .none))
+                DirectorOverlay(instruction: DirectorInstruction(text: "Make her laugh!", icon: "face.smiling", color: .blue, priority: .medium, haptic: .none))
             }
         }
     }

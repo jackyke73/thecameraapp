@@ -111,8 +111,11 @@ struct ContentView: View {
             faceBounds: cameraManager.mainFaceBounds,
             targetPoint: cameraManager.targetPoint,
             deviceRoll: cameraManager.deviceRoll,
+            devicePitch: cameraManager.devicePitch,
             isLevel: cameraManager.isLevel,
-            expressions: cameraManager.expressions
+            expressions: cameraManager.expressions,
+            lighting: cameraManager.semanticAnalysis.lightingQuality,
+            yoloCommand: cameraManager.yoloCommand
         )
     }
 

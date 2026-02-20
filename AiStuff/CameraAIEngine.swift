@@ -175,30 +175,50 @@ final class CameraAIEngine {
     private func runDepthModel(model: VNCoreMLModel, 
                                pixelBuffer: CVPixelBuffer, 
                                orientation: CGImagePropertyOrientation) -> [[Float]]? {
-        let request = VNCoreMLRequest(model: model)
-        request.imageCropAndScaleOption = .centerCrop
-        
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
-        try? handler.perform([request])
-        
-        guard let observations = request.results as? [VNCoreMLFeatureValueObservation],
-              let multiArray = observations.first?.featureValue.multiArrayValue else { return nil }
-        
-        // Convert MLMultiArray to a simpler 2D array for the Swarm to work with
-        // DepthAnythingV2Small usually outputs something like 1x518x518 or similar
-        let rows = multiArray.shape[1].intValue
-        let cols = multiArray.shape[2].intValue
-        
-        var result = [[Float]](repeating: [Float](repeating: 0, count: cols), count: rows)
-        
-        for y in 0..<rows {
-            for x in 0..<cols {
-                let index = [0, y, x] as [NSNumber]
-                result[y][x] = multiArray[index].floatValue
+        do {
+            let request = VNCoreMLRequest(model: model)
+            request.imageCropAndScaleOption = .scaleFill // Better for full scene depth
+            
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
+            try handler.perform([request])
+            
+            guard let observations = request.results as? [VNCoreMLFeatureValueObservation],
+                  let featureValue = observations.first?.featureValue,
+                  let multiArray = featureValue.multiArrayValue else { return nil }
+            
+            // DepthAnything output is usually (1, 518, 518)
+            // We only need a coarse grid for guidance (e.g. 10x10) to save CPU
+            // Let's sample the center and edges.
+            
+            let width = multiArray.shape[2].intValue
+            let height = multiArray.shape[1].intValue
+            
+            // Just return a simplified 3x3 grid:
+            // [TopLeft, Top, TopRight]
+            // [Left, Center, Right]
+            // [BottomLeft, Bottom, BottomRight]
+            // This is enough to know if background is close/far relative to center subject
+            
+            var grid: [[Float]] = Array(repeating: Array(repeating: 0.0, count: 3), count: 3)
+            
+            let stepX = width / 3
+            let stepY = height / 3
+            
+            for r in 0..<3 {
+                for c in 0..<3 {
+                    // Sample middle of the sector
+                    let x = c * stepX + (stepX / 2)
+                    let y = r * stepY + (stepY / 2)
+                    let index = [0, NSNumber(value: y), NSNumber(value: x)] as [NSNumber]
+                    grid[r][c] = multiArray[index].floatValue
+                }
             }
+            
+            return grid
+        } catch {
+            print("Depth failed: \(error)")
+            return nil
         }
-        
-        return result
     }
 
     // MARK: - Coordinate helpers (Native Conversion)
