@@ -155,6 +155,14 @@ struct ContentView: View {
                                     targetPoint: cameraManager.targetPoint,
                                     isAligned: cameraManager.isAligned
                                 )
+                                
+                                // ✅ Sovereign AI Object Guidance (YOLO)
+                                if cameraManager.isAIFeaturesEnabled && !cameraManager.detectedObjects.isEmpty {
+                                    ObjectGuidanceOverlay(
+                                        observations: cameraManager.detectedObjects,
+                                        frameSize: CGSize(width: width, height: targetHeight)
+                                    )
+                                }
 
                                 // ✅ Sun / light direction guidance (uses location + heading)
                                 if cameraManager.isAIFeaturesEnabled {

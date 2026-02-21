@@ -74,6 +74,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private var zoomScaler: CGFloat = 2.0
 
     let session = AVCaptureSession()
+    private var cancellables = Set<AnyCancellable>()
 
     private let sessionQueue = DispatchQueue(label: "camera.sessionQueue")
     private let videoOutputQueue = DispatchQueue(label: "camera.videoOutputQueue", qos: .utility)
@@ -102,6 +103,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     
     // Sovereign AI State
     @Published var yoloCommand: String = ""
+    @Published var detectedObjects: [VNRecognizedObjectObservation] = []
 
     // ✅ The preview layer reference (set by CameraPreview)
     weak var previewLayer: AVCaptureVideoPreviewLayer?
@@ -112,6 +114,17 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         configureOutputs()
         checkPermissions()
         startMotionUpdates()
+        
+        // Subscribe to YOLO Engine updates
+        yoloEngine.$detectedObjects
+            .receive(on: DispatchQueue.main)
+            .assign(to: \.detectedObjects, on: self)
+            .store(in: &cancellables)
+            
+        yoloEngine.$directorCommand
+            .receive(on: DispatchQueue.main)
+            .assign(to: \.yoloCommand, on: self)
+            .store(in: &cancellables)
     }
 
     deinit {
@@ -672,11 +685,6 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         // 3. YOLOv8 Analysis (Sovereign AI) - Every 5 frames (12fps effective)
         if self.frameCounter % 5 == 0 {
              yoloEngine.analyze(pixelBuffer: pixelBuffer)
-             
-             // Sync YOLO command to published property (it's already on main thread in engine)
-             DispatchQueue.main.async {
-                 self.yoloCommand = self.yoloEngine.directorCommand
-             }
         }
     }
 
