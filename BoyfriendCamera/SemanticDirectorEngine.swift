@@ -94,15 +94,50 @@ actor SemanticDirectorEngine {
                     } else {
                         // Check centering (Rule of Thirds-ish)
                         let centerX = face.midX
-                        if centerX < 0.4 {
-                            suggestion = "Pan Right ->"
-                            score = 0.6
-                        } else if centerX > 0.6 {
-                            suggestion = "<- Pan Left"
-                            score = 0.6
-                        } else {
+                        let centerY = face.midY
+                        
+                        // Vision coordinates: (0,0) is Bottom-Left.
+                        // Power Points X: 0.33, 0.66
+                        // Power Points Y: 0.33, 0.66
+                        
+                        let powerPoints = [
+                            CGPoint(x: 0.333, y: 0.333),
+                            CGPoint(x: 0.666, y: 0.333),
+                            CGPoint(x: 0.333, y: 0.666),
+                            CGPoint(x: 0.666, y: 0.666)
+                        ]
+                        
+                        // Find distance to closest power point
+                        let faceCenter = CGPoint(x: centerX, y: centerY)
+                        let closestDist = powerPoints.map { p in
+                            sqrt(pow(p.x - faceCenter.x, 2) + pow(p.y - faceCenter.y, 2))
+                        }.min() ?? 1.0
+                        
+                        // Distance threshold (in normalized coords)
+                        // 0.05 is roughly 5% of screen width
+                        if closestDist < 0.08 {
                             suggestion = "Perfect! Hold it."
                             score = 0.95
+                        } else if closestDist < 0.15 {
+                            suggestion = "Almost there..."
+                            score = 0.8
+                        } else {
+                            // Determine direction
+                            if centerX < 0.33 {
+                                suggestion = "Pan Right ->"
+                            } else if centerX > 0.66 {
+                                suggestion = "<- Pan Left"
+                            } else {
+                                // Center X is okay, maybe check Y?
+                                if centerY < 0.33 {
+                                    suggestion = "Tilt Up"
+                                } else if centerY > 0.66 {
+                                    suggestion = "Tilt Down"
+                                } else {
+                                    suggestion = "Align with Grid"
+                                }
+                            }
+                            score = 0.6
                         }
                     }
                 }

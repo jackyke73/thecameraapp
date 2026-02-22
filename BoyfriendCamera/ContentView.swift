@@ -182,9 +182,17 @@ struct ContentView: View {
                                 }
 
                                 if isGridEnabled {
-                                    GridOverlay()
-                                        .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                    if cameraManager.isAIFeaturesEnabled {
+                                        CompositionGuideOverlay(
+                                            mainFaceBounds: cameraManager.mainFaceBounds,
+                                            compositionScore: cameraManager.semanticAnalysis.compositionScore
+                                        )
                                         .frame(width: width, height: targetHeight)
+                                    } else {
+                                        GridOverlay()
+                                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                            .frame(width: width, height: targetHeight)
+                                    }
                                 }
                                 
                                 if isLevelerEnabled {
