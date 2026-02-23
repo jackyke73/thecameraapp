@@ -12,13 +12,23 @@ struct SemanticFrameAnalysis: Equatable, Sendable {
     let creativeSuggestion: String? // e.g., "Try a lower angle for a heroic look."
     let clutterDetected: Bool
     
+    // New: 3D / Spatial Guidance (The "Director's Cut")
+    let spatialGuidance: SpatialGuidance?
+    
     static let empty = SemanticFrameAnalysis(
         sceneDescription: "Analyzing scene...",
         lightingQuality: .unknown,
         compositionScore: 0.0,
         creativeSuggestion: nil,
-        clutterDetected: false
+        clutterDetected: false,
+        spatialGuidance: nil
     )
+}
+
+struct SpatialGuidance: Equatable, Sendable {
+    let action: String // e.g., "Move Left", "Tilt Up"
+    let confidence: Double
+    let targetObject: String? // e.g., "The Campanile", "Sunset"
 }
 
 enum LightingQuality: String, Sendable {
@@ -49,6 +59,10 @@ actor SemanticDirectorEngine {
     private var lastLightingQuality: LightingQuality = .unknown
     private var lightingStabilityCount: Int = 0
     private let stabilityThreshold: Int = 2 // Require 2 consecutive frames for a change
+    
+    // State for "Director Persona" (Mock VLM Context)
+    private var frameCounter: Int = 0
+    private var lastGuidanceChangeTime: TimeInterval = 0
 
     func analyze(pixelBuffer: CVPixelBuffer) async throws -> SemanticFrameAnalysis {
         // Run Vision analysis
@@ -73,12 +87,20 @@ actor SemanticDirectorEngine {
         var suggestion: String? = nil
         var score: Double = 0.5
         var description = "Scene"
+        var spatialAction: SpatialGuidance? = nil
         
         if let result = visionResult {
             if result.faceCount == 0 {
                 description = "Landscape / Object"
                 suggestion = "Find a subject!"
                 score = 0.3
+                
+                // Simulating VLM "Interest"
+                if result.subjectIsolationScore > 0.3 {
+                   description = "Object Detected"
+                   suggestion = "Center the object."
+                   score = 0.6
+                }
             } else if result.faceCount == 1 {
                 description = "Portrait"
                 if let face = result.mainFaceBounds {
@@ -88,9 +110,11 @@ actor SemanticDirectorEngine {
                     if faceArea < 0.05 {
                         suggestion = "Move closer!"
                         score = 0.4
+                        spatialAction = SpatialGuidance(action: "Move Forward", confidence: 0.8, targetObject: "Subject")
                     } else if faceArea > 0.6 {
                         suggestion = "Back up a bit!"
                         score = 0.4
+                        spatialAction = SpatialGuidance(action: "Move Back", confidence: 0.8, targetObject: "Subject")
                     } else {
                         // Check centering (Rule of Thirds-ish)
                         let centerX = face.midX
@@ -118,6 +142,7 @@ actor SemanticDirectorEngine {
                         if closestDist < 0.08 {
                             suggestion = "Perfect! Hold it."
                             score = 0.95
+                            spatialAction = SpatialGuidance(action: "Hold", confidence: 1.0, targetObject: "Composition")
                         } else if closestDist < 0.15 {
                             suggestion = "Almost there..."
                             score = 0.8
@@ -125,14 +150,18 @@ actor SemanticDirectorEngine {
                             // Determine direction
                             if centerX < 0.33 {
                                 suggestion = "Pan Right ->"
+                                spatialAction = SpatialGuidance(action: "Pan Right", confidence: 0.7, targetObject: "Rule of Thirds")
                             } else if centerX > 0.66 {
                                 suggestion = "<- Pan Left"
+                                spatialAction = SpatialGuidance(action: "Pan Left", confidence: 0.7, targetObject: "Rule of Thirds")
                             } else {
                                 // Center X is okay, maybe check Y?
                                 if centerY < 0.33 {
                                     suggestion = "Tilt Up"
+                                    spatialAction = SpatialGuidance(action: "Tilt Up", confidence: 0.7, targetObject: "Eye Level")
                                 } else if centerY > 0.66 {
                                     suggestion = "Tilt Down"
+                                    spatialAction = SpatialGuidance(action: "Tilt Down", confidence: 0.7, targetObject: "Eye Level")
                                 } else {
                                     suggestion = "Align with Grid"
                                 }
@@ -145,6 +174,7 @@ actor SemanticDirectorEngine {
                 description = "Group Shot (\(result.faceCount))"
                 suggestion = "Squeeze in closer!"
                 score = 0.7
+                spatialAction = SpatialGuidance(action: "Step Back", confidence: 0.6, targetObject: "Group")
             }
         }
         
@@ -163,13 +193,33 @@ actor SemanticDirectorEngine {
                 finalLighting = lastLightingQuality
             }
         }
+        
+        // Mock VLM "Creative Thoughts" (injected every ~3 seconds if stable)
+        // This simulates the "Active Vision" querying the LLM for higher-level ideas
+        let now = Date().timeIntervalSince1970
+        if now - lastGuidanceChangeTime > 5.0 && score > 0.7 {
+            // Only suggest creative things if basic composition is okay
+            let creativeIdeas = [
+                "Try a lower angle for a heroic look.",
+                "Look for leading lines in the background.",
+                "Capture the negative space on the left.",
+                "Great light! Try a silhouette?"
+            ]
+            // We don't actually change the 'suggestion' field here to avoid flickering the main instruction,
+            // but we could populate a 'secondary' suggestion field if the UI supported it.
+            // For now, let's just occasionally override if score is high.
+             if Double.random(in: 0...1) > 0.8 {
+                 suggestion = creativeIdeas.randomElement()
+             }
+        }
 
         return SemanticFrameAnalysis(
             sceneDescription: description,
             lightingQuality: finalLighting,
             compositionScore: score,
             creativeSuggestion: suggestion,
-            clutterDetected: false // TODO: Use segmentation mask ratio
+            clutterDetected: false, // TODO: Use segmentation mask ratio
+            spatialGuidance: spatialAction
         )
     }
 }

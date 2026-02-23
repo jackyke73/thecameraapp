@@ -73,6 +73,35 @@ struct SmartDirectorHUD: View {
                     Spacer()
                 }
                 
+                // Spatial Guidance (New)
+                if let guidance = cameraManager.semanticAnalysis.spatialGuidance {
+                    HStack(spacing: 12) {
+                        Image(systemName: arrowIcon(for: guidance.action))
+                            .font(.title2)
+                            .foregroundColor(.cyan)
+                            .frame(width: 30)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(guidance.action.uppercased())
+                                .font(.system(size: 12, weight: .black))
+                                .foregroundColor(.cyan)
+                            if let target = guidance.targetObject {
+                                Text("Target: \(target)")
+                                    .font(.caption2)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.cyan.opacity(0.15))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.cyan.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                
                 // Creative Suggestion
                 if let suggestion = cameraManager.semanticAnalysis.creativeSuggestion {
                     HStack(alignment: .top, spacing: 8) {
@@ -99,6 +128,20 @@ struct SmartDirectorHUD: View {
                     .stroke(Color.white.opacity(0.15), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 5)
+        }
+    }
+    
+    private func arrowIcon(for action: String) -> String {
+        switch action {
+        case "Move Forward": return "arrow.up"
+        case "Move Back": return "arrow.down"
+        case "Pan Right": return "arrow.right"
+        case "Pan Left": return "arrow.left"
+        case "Tilt Up": return "arrow.up.circle"
+        case "Tilt Down": return "arrow.down.circle"
+        case "Hold": return "checkmark.circle.fill"
+        case "Step Back": return "arrow.down.to.line"
+        default: return "scope"
         }
     }
     
