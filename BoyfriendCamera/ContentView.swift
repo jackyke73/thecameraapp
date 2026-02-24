@@ -39,6 +39,7 @@ struct ContentView: View {
 
     // SETTINGS STATES
     @State private var showSettings = false
+    @State private var showDirectorMode = false // New AR Director Mode
     @State private var exposureValue: Float = 0.0
     @State private var whiteBalanceValue: Float = 5500.0
     @State private var focusValue: Float = 0.5
@@ -652,6 +653,30 @@ struct ContentView: View {
 
                                     ToggleButton(icon: "sparkles", label: "AI", isOn: $cameraManager.isAIFeaturesEnabled)
                                     
+                                    // Director Mode (Splatting)
+                                    Button {
+                                        showDirectorMode = true
+                                        showSettings = false
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "cube.transparent")
+                                            Text("Splat")
+                                                .font(.caption.bold())
+                                        }
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(
+                                            .ultraThinMaterial,
+                                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    
                                     // Smart Shutter Toggle
                                     ToggleButton(icon: "camera.shutter.button.fill", label: "Auto", isOn: $cameraManager.isSmartShutterEnabled)
                                 }
@@ -792,6 +817,13 @@ struct ContentView: View {
                 }
                 .sheet(isPresented: $showPhotoReview) {
                     PhotoReviewView()
+                }
+                .fullScreenCover(isPresented: $showDirectorMode) {
+                    SplatCaptureView()
+                        .onDisappear {
+                            // Ensure camera resumes when returning
+                            cameraManager.checkPermissions()
+                        }
                 }
                 .onPreferenceChange(_PreviewGlobalFrameKey.self) { previewGlobalFrame = $0 }
                 .onReceive(locationManager.$heading) { _ in

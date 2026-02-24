@@ -22,10 +22,40 @@ struct SplatAction: Sendable {
     let actionDescription: String // e.g., "Shift 1m Left", "Inpaint Background"
 }
 
+// MARK: - Active Guidance Types
+
+struct VoxelKey: Hashable, Sendable {
+    let x: Int
+    let y: Int
+    let z: Int
+}
+
+struct VoxelInfo: Sendable {
+    var splatCount: Int = 0
+    // Bitmask of 8 octants to track view diversity (simple heuristic for entropy)
+    var visitedViewOctants: UInt8 = 0 
+    
+    // Heuristic: Uncertainty is high if we haven't seen this voxel from multiple angles,
+    // or if it has very few splats (potential hole).
+    var uncertainty: Float {
+        let densityScore = min(Float(splatCount) / 10.0, 1.0) // Saturation at 10 splats
+        let diversityScore = Float(visitedViewOctants.nonzeroBitCount) / 8.0
+        
+        // We want to minimize uncertainty.
+        // If density is 0, uncertainty is 1.0.
+        // If density is high but diversity is low, uncertainty is medium.
+        return 1.0 - (densityScore * 0.7 + diversityScore * 0.3)
+    }
+}
+
 /// The Agentic3DEngine is responsible for bridging 2D images with 3D Gaussian Splatting spatial understanding.
 actor Agentic3DEngine {
     
     private let isExperimental: Bool = true
+    
+    // Active Guidance State
+    private var voxelGrid: [VoxelKey: VoxelInfo] = [:]
+    private let voxelSize: Float = 0.1 // 10cm voxels
     
     init() {
         print("Agentic3DEngine: Initializing Spatial Reasoning Systems...")
@@ -59,6 +89,85 @@ actor Agentic3DEngine {
         ]
     }
     
+    // MARK: - AG-Splatting Guidance
+    
+    /// Updates the voxel grid with new splat data and returns a guidance vector for the next best view.
+    func updateUncertaintyMap(currentCameraPosition: SIMD3<Float>, newSplats: [SIMD3<Float>]) -> SIMD3<Float>? {
+        // 1. Integrate new splats into voxels
+        for splatPos in newSplats {
+            let key = toVoxelKey(splatPos)
+            var info = voxelGrid[key] ?? VoxelInfo()
+            info.splatCount += 1
+            
+            // Calculate view octant (simplified view direction)
+            let viewDir = normalize(splatPos - currentCameraPosition)
+            let octant = getOctant(viewDir)
+            info.visitedViewOctants |= (1 << octant)
+            
+            voxelGrid[key] = info
+        }
+        
+        // 2. Find High Uncertainty Centroid (Target)
+        // Filter for voxels that have *some* data but need *more* (don't guide to empty space yet)
+        let uncertainVoxels = voxelGrid.filter { _, info in
+            info.splatCount > 0 && info.uncertainty > 0.4
+        }
+        
+        guard !uncertainVoxels.isEmpty else { return nil } // Scan complete!
+        
+        // Compute weighted centroid
+        var weightedSum = SIMD3<Float>(0, 0, 0)
+        var totalWeight: Float = 0
+        
+        for (key, info) in uncertainVoxels {
+            let pos = fromVoxelKey(key)
+            let weight = info.uncertainty
+            weightedSum += pos * weight
+            totalWeight += weight
+        }
+        
+        let targetPos = weightedSum / totalWeight
+        
+        // 3. Generate Guidance Vector (Move towards target position's "unseen" side)
+        // Ideally, we'd solve for the view direction that maximizes entropy reduction.
+        // Simple heuristic: Move towards the centroid.
+        let guidanceVector = normalize(targetPos - currentCameraPosition)
+        return guidanceVector
+    }
+    
+    private func toVoxelKey(_ pos: SIMD3<Float>) -> VoxelKey {
+        VoxelKey(
+            x: Int(floor(pos.x / voxelSize)),
+            y: Int(floor(pos.y / voxelSize)),
+            z: Int(floor(pos.z / voxelSize))
+        )
+    }
+    
+    private func fromVoxelKey(_ key: VoxelKey) -> SIMD3<Float> {
+        SIMD3<Float>(
+            Float(key.x) * voxelSize + voxelSize/2,
+            Float(key.y) * voxelSize + voxelSize/2,
+            Float(key.z) * voxelSize + voxelSize/2
+        )
+    }
+    
+    private func getOctant(_ dir: SIMD3<Float>) -> Int {
+        var octant = 0
+        if dir.x > 0 { octant |= 1 }
+        if dir.y > 0 { octant |= 2 }
+        if dir.z > 0 { octant |= 4 }
+        return octant
+    }
+    
+    /// Returns a list of center points for voxels with high uncertainty.
+    /// Used for debug visualization in the UI.
+    func getHighUncertaintyVoxels() -> [SIMD3<Float>] {
+        let highUncertainty = voxelGrid.filter { _, info in
+            info.splatCount > 0 && info.uncertainty > 0.4
+        }
+        return highUncertainty.map { key, _ in fromVoxelKey(key) }
+    }
+
     /// Suggests how to "fix" the 3D scene by moving objects (The "Agentic Photographer" mode).
     func suggest3DAdjustments(objects: [SplatObject]) -> [SplatAction] {
         var actions: [SplatAction] = []

@@ -19,10 +19,15 @@ class SplatCaptureEngine: ObservableObject {
     @Published var state: CaptureState = .idle
     @Published var coverage: Float = 0.0 // 0.0 to 1.0 (percent of the sphere covered)
     @Published var instructions: String = "Find your object"
-    
+    @Published var uncertainVoxels: [SIMD3<Float>] = [] // For visualization
+    @Published var guidanceVector: SIMD3<Float>? = nil // Direction to move
+
     private var capturedKeyframes: [ARFrame] = []
     private var centerPoint: simd_float3?
     private let requiredKeyframes = 40
+    
+    // Dependencies
+    private let agentic3DEngine = Agentic3DEngine()
     
     func startCapture(at center: simd_float3) {
         self.centerPoint = center
@@ -58,6 +63,33 @@ class SplatCaptureEngine: ObservableObject {
         if capturedKeyframes.count < requiredKeyframes {
             capturedKeyframes.append(frame)
             coverage = Float(capturedKeyframes.count) / Float(requiredKeyframes)
+            
+            // AG-Splatting Integration (Visualization)
+            Task {
+                // Get sparse points from ARKit as "splats"
+                let newSplats = frame.rawFeaturePoints?.points ?? []
+                
+                // Update Engine & Get Guidance
+                if let vector = await agentic3DEngine.updateUncertaintyMap(currentCameraPosition: cameraPos, newSplats: newSplats) {
+                    await MainActor.run {
+                        self.guidanceVector = vector
+                        // Simple check: is vector pointing mostly up, left, right?
+                        if abs(vector.y) > 0.8 {
+                            self.instructions = vector.y > 0 ? "Move Up" : "Move Down"
+                        } else if abs(vector.x) > abs(vector.z) {
+                            self.instructions = vector.x > 0 ? "Move Right" : "Move Left"
+                        } else {
+                            self.instructions = "Orbit Around"
+                        }
+                    }
+                }
+                
+                // Update Visualization Data
+                let voxels = await agentic3DEngine.getHighUncertaintyVoxels()
+                await MainActor.run {
+                    self.uncertainVoxels = voxels
+                }
+            }
             
             if coverage >= 1.0 {
                 finalizeCapture()
