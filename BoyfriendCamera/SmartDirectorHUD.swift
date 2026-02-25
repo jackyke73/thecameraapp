@@ -73,6 +73,44 @@ struct SmartDirectorHUD: View {
                     Spacer()
                 }
                 
+                // Cinematic Motion (New)
+                if let score = cameraManager.cinematicScore {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Image(systemName: score.isStable ? "video.fill" : "video.slash.fill")
+                                .font(.caption2)
+                                .foregroundColor(score.isStable ? .green : .orange)
+                            
+                            Text(score.feedback.uppercased())
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(score.isStable ? .green : .orange)
+                            
+                            Spacer()
+                            
+                            Text("\(Int(score.value * 100))%")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        
+                        // Stability Bar
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color.white.opacity(0.1))
+                                    .frame(height: 4)
+                                
+                                Capsule()
+                                    .fill(score.isStable ? Color.green : Color.orange)
+                                    .frame(width: geo.size.width * score.stability, height: 4)
+                            }
+                        }
+                        .frame(height: 4)
+                    }
+                    .padding(8)
+                    .background(Color.black.opacity(0.2))
+                    .cornerRadius(8)
+                }
+                
                 // Spatial Guidance (New)
                 if let guidance = cameraManager.semanticAnalysis.spatialGuidance {
                     HStack(spacing: 12) {

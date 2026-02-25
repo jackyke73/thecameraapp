@@ -27,6 +27,10 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     private let motionManager = CMMotionManager()
     private var hasHapticPlayedForLevel = false
     
+    // Cinematic Scoring
+    private let cinematicScorer = CinematicScorer()
+    @Published var cinematicScore: CinematicScore? = nil
+    
     // Guidance (normalized 0...1 in preview space)
     @Published var nosePoint: CGPoint? = nil
     @Published var targetPoint: CGPoint = CGPoint(x: 0.5, y: 0.38)   // tweak this
@@ -93,7 +97,8 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     // ✅ AI engine
     private let aiEngine = CameraAIEngine()
-    private let semanticEngine = SemanticDirectorEngine()
+    // Using protocol for dependency injection capability (swapping VLM/Heuristic)
+    private let semanticEngine: DirectorEngineProtocol = SemanticDirectorEngine()
     private let yoloEngine = YOLOv8DirectorEngine() // Sovereign AI
     private let agentic3DEngine = Agentic3DEngine()
     private var frameCounter = 0
@@ -155,6 +160,10 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             
             let threshold = 0.02
             let isHorizonLevel = abs(rotation) < threshold
+            
+            // Calculate Cinematic Score (Velocity & Jitter)
+            let score = self.cinematicScorer.update(motion: motion)
+            self.cinematicScore = score
             
             self.deviceRoll = rotation // This is now actual rotation in radians
             self.devicePitch = motion.gravity.z
