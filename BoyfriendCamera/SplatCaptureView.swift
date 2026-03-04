@@ -1,12 +1,15 @@
 import SwiftUI
 import RealityKit
 import ARKit
+import Combine
 
 struct SplatCaptureView: View {
     @Environment(\.dismiss) var dismiss
     @StateObject private var engine = SplatCaptureEngine()
-    @State private var arView: ARView?
     
+    // We hold a reference to the ARView to update it from SwiftUI
+    @State private var arView: VoxelARView?
+
     var body: some View {
         ZStack {
             // AR Camera Feed
@@ -43,8 +46,6 @@ struct SplatCaptureView: View {
                 Spacer()
                 
                 // Debug Visualization (Uncertain Voxels)
-                // In a real app, this would be 3D entities in RealityKit.
-                // For MVP, we list them or show a count.
                 if !engine.uncertainVoxels.isEmpty {
                     VStack {
                         Text("High Uncertainty Zones: \(engine.uncertainVoxels.count)")
@@ -73,7 +74,9 @@ struct SplatCaptureView: View {
                             var translation = matrix_identity_float4x4
                             translation.columns.3.z = -1.0 // 1 meter forward
                             let center = (transform * translation).columns.3
-                            engine.startCapture(at: simd_make_float3(center))
+                            // engine.startCapture(at: simd_make_float3(center)) 
+                            // TODO: Fix type mismatch if needed, but for now passing simd_float3
+                             engine.startCapture(at: simd_make_float3(center.x, center.y, center.z))
                         }
                     }
                 }) {
@@ -90,20 +93,53 @@ struct SplatCaptureView: View {
                 .padding(.bottom, 40)
             }
         }
+        // Update AR entities when uncertainVoxels changes
+        .onChange(of: engine.uncertainVoxels) { newVoxels in
+            arView?.updateVoxelVisualization(voxels: newVoxels)
+        }
+    }
+}
+
+// Custom ARView to handle RealityKit entities
+class VoxelARView: ARView {
+    private var voxelAnchor: AnchorEntity?
+    private var voxelEntities: [ModelEntity] = []
+    
+    func setup() {
+        let anchor = AnchorEntity(world: .zero)
+        scene.anchors.append(anchor)
+        self.voxelAnchor = anchor
+    }
+
+    func updateVoxelVisualization(voxels: [SIMD3<Float>]) {
+        guard let anchor = voxelAnchor else { return }
+        
+        anchor.children.removeAll()
+        
+        let mesh = MeshResource.generateBox(size: 0.05) // 5cm boxes
+        let material = SimpleMaterial(color: .red.withAlphaComponent(0.6), isMetallic: false)
+        
+        for position in voxels {
+            let entity = ModelEntity(mesh: mesh, materials: [material])
+            entity.position = position
+            anchor.addChild(entity)
+        }
     }
 }
 
 struct ARViewContainer: UIViewRepresentable {
     @ObservedObject var engine: SplatCaptureEngine
-    @Binding var arViewBinding: ARView?
+    @Binding var arViewBinding: VoxelARView?
     
-    func makeUIView(context: Context) -> ARView {
-        let arView = ARView(frame: .zero)
+    func makeUIView(context: Context) -> VoxelARView {
+        let arView = VoxelARView(frame: .zero)
         
         // Configure AR Session
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
         arView.session.run(config)
+        
+        arView.setup()
         
         // Set delegate
         arView.session.delegate = context.coordinator
@@ -116,7 +152,7 @@ struct ARViewContainer: UIViewRepresentable {
         return arView
     }
     
-    func updateUIView(_ uiView: ARView, context: Context) {}
+    func updateUIView(_ uiView: VoxelARView, context: Context) {}
     
     func makeCoordinator() -> Coordinator {
         Coordinator(engine: engine)
