@@ -42,7 +42,7 @@ enum LightingQuality: String, Sendable {
 }
 
 // Service to run semantic inference (VLM / MobileVLM mock + Vision Analysis)
-actor SemanticDirectorEngine {
+actor SemanticDirectorEngine: DirectorEngineProtocol {
     
     // Simulate inference time
     private let inferenceDuration: TimeInterval = 0.1 // Fast Vision loop (100ms)
@@ -63,6 +63,14 @@ actor SemanticDirectorEngine {
     // State for "Director Persona" (Mock VLM Context)
     private var frameCounter: Int = 0
     private var lastGuidanceChangeTime: TimeInterval = 0
+    
+    // Conformance to DirectorEngineProtocol
+    func resetState() {
+        lastLightingQuality = .unknown
+        lightingStabilityCount = 0
+        frameCounter = 0
+        lastGuidanceChangeTime = 0
+    }
 
     func analyze(pixelBuffer: CVPixelBuffer) async throws -> SemanticFrameAnalysis {
         // Run Vision analysis
@@ -90,6 +98,7 @@ actor SemanticDirectorEngine {
         var spatialAction: SpatialGuidance? = nil
         
         if let result = visionResult {
+            // Priority 1: Face Logic
             if result.faceCount == 0 {
                 description = "Landscape / Object"
                 suggestion = "Find a subject!"
@@ -101,13 +110,37 @@ actor SemanticDirectorEngine {
                    suggestion = "Center the object."
                    score = 0.6
                 }
-            } else if result.faceCount == 1 {
-                description = "Portrait"
+            } else if result.faceCount >= 1 {
+                // We have a subject. Let's see if we have body pose data too.
+                var poseFeedback: String? = nil
+                var poseType = "Portrait"
+                
+                if let pose = result.bodyPose {
+                     // Check for Full Body
+                     let joints = try? pose.recognizedPoints(.all)
+                     if let leftAnkle = joints?[.leftAnkle], let rightAnkle = joints?[.rightAnkle], leftAnkle.confidence > 0.5 || rightAnkle.confidence > 0.5 {
+                         poseType = "Full Body"
+                     } else if let leftHip = joints?[.leftHip], let rightHip = joints?[.rightHip], leftHip.confidence > 0.5 {
+                         poseType = "Waist Up"
+                     }
+                     
+                     // Check Posture (Shoulder Tilt)
+                     if let leftShoulder = joints?[.leftShoulder], let rightShoulder = joints?[.rightShoulder],
+                        leftShoulder.confidence > 0.6 && rightShoulder.confidence > 0.6 {
+                         
+                         let tilt = leftShoulder.location.y - rightShoulder.location.y
+                         if abs(tilt) > 0.05 { // 5% height difference
+                             poseFeedback = "Level your shoulders!"
+                         }
+                     }
+                }
+                
+                description = poseType
+                
                 if let face = result.mainFaceBounds {
                     let faceArea = face.width * face.height
-                    // Face coordinates are normalized (0.0 to 1.0)
                     
-                    if faceArea < 0.05 {
+                    if faceArea < 0.05 && poseType == "Portrait" {
                         suggestion = "Move closer!"
                         score = 0.4
                         spatialAction = SpatialGuidance(action: "Move Forward", confidence: 0.8, targetObject: "Subject")
@@ -120,10 +153,6 @@ actor SemanticDirectorEngine {
                         let centerX = face.midX
                         let centerY = face.midY
                         
-                        // Vision coordinates: (0,0) is Bottom-Left.
-                        // Power Points X: 0.33, 0.66
-                        // Power Points Y: 0.33, 0.66
-                        
                         let powerPoints = [
                             CGPoint(x: 0.333, y: 0.333),
                             CGPoint(x: 0.666, y: 0.333),
@@ -131,20 +160,17 @@ actor SemanticDirectorEngine {
                             CGPoint(x: 0.666, y: 0.666)
                         ]
                         
-                        // Find distance to closest power point
                         let faceCenter = CGPoint(x: centerX, y: centerY)
                         let closestDist = powerPoints.map { p in
                             sqrt(pow(p.x - faceCenter.x, 2) + pow(p.y - faceCenter.y, 2))
                         }.min() ?? 1.0
                         
-                        // Distance threshold (in normalized coords)
-                        // 0.05 is roughly 5% of screen width
                         if closestDist < 0.08 {
-                            suggestion = "Perfect! Hold it."
+                            suggestion = poseFeedback ?? "Perfect! Hold it."
                             score = 0.95
                             spatialAction = SpatialGuidance(action: "Hold", confidence: 1.0, targetObject: "Composition")
                         } else if closestDist < 0.15 {
-                            suggestion = "Almost there..."
+                            suggestion = poseFeedback ?? "Almost there..."
                             score = 0.8
                         } else {
                             // Determine direction
@@ -155,7 +181,6 @@ actor SemanticDirectorEngine {
                                 suggestion = "<- Pan Left"
                                 spatialAction = SpatialGuidance(action: "Pan Left", confidence: 0.7, targetObject: "Rule of Thirds")
                             } else {
-                                // Center X is okay, maybe check Y?
                                 if centerY < 0.33 {
                                     suggestion = "Tilt Up"
                                     spatialAction = SpatialGuidance(action: "Tilt Up", confidence: 0.7, targetObject: "Eye Level")
@@ -163,18 +188,21 @@ actor SemanticDirectorEngine {
                                     suggestion = "Tilt Down"
                                     spatialAction = SpatialGuidance(action: "Tilt Down", confidence: 0.7, targetObject: "Eye Level")
                                 } else {
-                                    suggestion = "Align with Grid"
+                                    suggestion = poseFeedback ?? "Align with Grid"
                                 }
                             }
                             score = 0.6
                         }
                     }
                 }
-            } else {
-                description = "Group Shot (\(result.faceCount))"
-                suggestion = "Squeeze in closer!"
-                score = 0.7
-                spatialAction = SpatialGuidance(action: "Step Back", confidence: 0.6, targetObject: "Group")
+                
+                // Override with group text if multiple faces
+                if result.faceCount > 1 {
+                    description = "Group Shot (\(result.faceCount))"
+                    if score < 0.5 {
+                         suggestion = "Squeeze in closer!"
+                    }
+                }
             }
         }
         
@@ -194,22 +222,16 @@ actor SemanticDirectorEngine {
             }
         }
         
-        // Mock VLM "Creative Thoughts" (injected every ~3 seconds if stable)
-        // This simulates the "Active Vision" querying the LLM for higher-level ideas
+        // Creative Overrides
         let now = Date().timeIntervalSince1970
         if now - lastGuidanceChangeTime > 5.0 && score > 0.7 {
-            // Only suggest creative things if basic composition is okay
-            let creativeIdeas = [
-                "Try a lower angle for a heroic look.",
-                "Look for leading lines in the background.",
-                "Capture the negative space on the left.",
-                "Great light! Try a silhouette?"
-            ]
-            // We don't actually change the 'suggestion' field here to avoid flickering the main instruction,
-            // but we could populate a 'secondary' suggestion field if the UI supported it.
-            // For now, let's just occasionally override if score is high.
              if Double.random(in: 0...1) > 0.8 {
-                 suggestion = creativeIdeas.randomElement()
+                 suggestion = [
+                    "Try a lower angle for a heroic look.",
+                    "Look for leading lines in the background.",
+                    "Capture the negative space on the left.",
+                    "Great light! Try a silhouette?"
+                 ].randomElement()
              }
         }
 
@@ -218,7 +240,7 @@ actor SemanticDirectorEngine {
             lightingQuality: finalLighting,
             compositionScore: score,
             creativeSuggestion: suggestion,
-            clutterDetected: false, // TODO: Use segmentation mask ratio
+            clutterDetected: false,
             spatialGuidance: spatialAction
         )
     }

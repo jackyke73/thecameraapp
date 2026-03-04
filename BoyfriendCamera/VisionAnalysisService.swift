@@ -13,11 +13,13 @@ class VisionAnalysisService {
     private let faceDetectionRequest: VNDetectFaceRectanglesRequest
     private let textDetectionRequest: VNRecognizeTextRequest
     private let personSegmentationRequest: VNGeneratePersonSegmentationRequest
+    private let bodyPoseRequest: VNDetectHumanBodyPoseRequest // New
     
     init() {
         self.faceDetectionRequest = VNDetectFaceRectanglesRequest()
         self.textDetectionRequest = VNRecognizeTextRequest()
         self.personSegmentationRequest = VNGeneratePersonSegmentationRequest()
+        self.bodyPoseRequest = VNDetectHumanBodyPoseRequest() // New
         
         // Configure for speed/accuracy trade-off
         self.textDetectionRequest.recognitionLevel = .fast
@@ -30,6 +32,7 @@ class VisionAnalysisService {
         let hasText: Bool
         let subjectIsolationScore: Float // 0.0 to 1.0 (based on segmentation mask area vs frame)
         let brightness: Float // 0.0 to 1.0 (Average Luma)
+        let bodyPose: VNHumanBodyPoseObservation? // New
     }
     
     func analyze(pixelBuffer: CVPixelBuffer) -> VisionFrameResult? {
@@ -69,7 +72,7 @@ class VisionAnalysisService {
 
         do {
             // Run requests synchronously (this should be called on a background queue)
-            try handler.perform([faceDetectionRequest, personSegmentationRequest])
+            try handler.perform([faceDetectionRequest, personSegmentationRequest, bodyPoseRequest])
             
             // 1. Face Analysis
             let faces = faceDetectionRequest.results ?? []
@@ -88,12 +91,17 @@ class VisionAnalysisService {
                  isolationScore = 0.5 // Default "person present" score
             }
             
+            // 3. Body Pose Analysis
+            // We prioritize the body pose that matches the main face if possible, or just the largest one.
+            let bodyPose = bodyPoseRequest.results?.first
+            
             return VisionFrameResult(
                 faceCount: faceCount,
                 mainFaceBounds: mainFace?.boundingBox,
                 hasText: false, // Skip text for now to save 5ms
                 subjectIsolationScore: isolationScore,
-                brightness: brightness
+                brightness: brightness,
+                bodyPose: bodyPose
             )
             
         } catch {

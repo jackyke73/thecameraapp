@@ -135,6 +135,17 @@ actor Agentic3DEngine {
         return guidanceVector
     }
     
+    /// Returns the centroids of high-uncertainty voxels for visualization.
+    func getHighUncertaintyVoxels() -> [SIMD3<Float>] {
+        return voxelGrid.compactMap { (key, info) -> SIMD3<Float>? in
+            // Return centroid if uncertainty is high AND we have some data (it's not empty space)
+            if info.uncertainty > 0.6 && info.splatCount > 0 {
+                return fromVoxelKey(key)
+            }
+            return nil
+        }
+    }
+    
     private func toVoxelKey(_ pos: SIMD3<Float>) -> VoxelKey {
         VoxelKey(
             x: Int(floor(pos.x / voxelSize)),
@@ -158,15 +169,7 @@ actor Agentic3DEngine {
         if dir.z > 0 { octant |= 4 }
         return octant
     }
-    
-    /// Returns a list of center points for voxels with high uncertainty.
-    /// Used for debug visualization in the UI.
-    func getHighUncertaintyVoxels() -> [SIMD3<Float>] {
-        let highUncertainty = voxelGrid.filter { _, info in
-            info.splatCount > 0 && info.uncertainty > 0.4
-        }
-        return highUncertainty.map { key, _ in fromVoxelKey(key) }
-    }
+
 
     /// Suggests how to "fix" the 3D scene by moving objects (The "Agentic Photographer" mode).
     func suggest3DAdjustments(objects: [SplatObject]) -> [SplatAction] {

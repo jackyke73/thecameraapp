@@ -37,6 +37,11 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     // AI state
     @Published var isAIFeaturesEnabled: Bool = true
+    @Published var isVoiceGuidanceEnabled: Bool = false {
+        didSet {
+            VoiceDirectorEngine.shared.isEnabled = isVoiceGuidanceEnabled
+        }
+    }
     @Published var isPersonDetected = false
     @Published var peopleCount: Int = 0
     @Published var expressions: [String] = []
