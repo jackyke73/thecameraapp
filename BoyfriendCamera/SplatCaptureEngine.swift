@@ -21,10 +21,16 @@ class SplatCaptureEngine: ObservableObject {
     @Published var instructions: String = "Find your object"
     @Published var uncertainVoxels: [SIMD3<Float>] = [] // For visualization
     @Published var guidanceVector: SIMD3<Float>? = nil // Direction to move
+    @Published var capturedFrameCount: Int = 0
 
     private var capturedKeyframes: [ARFrame] = []
     private var centerPoint: simd_float3?
     private let requiredKeyframes = 40
+    
+    // Octree for spatial diversity check (prevent redundant frame capture)
+    private var capturedBuckets: Set<Int> = []
+    private let horizontalBuckets = 36 // 10 degrees per bucket
+    private let verticalBuckets = 12   // 15 degrees per bucket
     
     // Dependencies
     private let agentic3DEngine = Agentic3DEngine()
@@ -33,8 +39,14 @@ class SplatCaptureEngine: ObservableObject {
         self.centerPoint = center
         self.state = .capturing
         self.capturedKeyframes = []
+        self.capturedBuckets = []
         self.coverage = 0.0
+        self.capturedFrameCount = 0
         self.instructions = "Slowly orbit the object"
+        
+        // Haptic feedback for start
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
     }
     
     func update(with frame: ARFrame) {
@@ -43,68 +55,113 @@ class SplatCaptureEngine: ObservableObject {
         let cameraTransform = frame.camera.transform
         let cameraPos = simd_make_float3(cameraTransform.columns.3)
         
-        // Logic: Calculate angle around the center point
-        // Check if we have a keyframe at this angle. If not, save one.
-        // Update coverage based on angle diversity.
-        
         processFrameForCoverage(frame, cameraPos: cameraPos, center: center)
     }
     
     private func processFrameForCoverage(_ frame: ARFrame, cameraPos: simd_float3, center: simd_float3) {
-        // Simplified heuristic for this prototype:
-        // Measure the angle around the Y-axis relative to the center.
         let direction = cameraPos - center
-        let angle = atan2(direction.z, direction.x)
+        let distance = simd_length(direction)
         
-        // If this angle is 'new' enough, store the frame for the trainer
-        // (In a real app, we'd store the image buffer + pose)
+        // Distance check: Stay within a reasonable capture range (0.3m to 3.0m)
+        if distance < 0.3 {
+            self.instructions = "Too Close - Move Back"
+            return
+        } else if distance > 3.0 {
+            self.instructions = "Too Far - Get Closer"
+            return
+        }
+
+        // Calculate angular position on the capture sphere
+        let azimuth = atan2(direction.z, direction.x) // -PI to PI
+        let polar = acos(direction.y / distance)    // 0 to PI
         
-        // Update mock coverage for UI development
-        if capturedKeyframes.count < requiredKeyframes {
-            capturedKeyframes.append(frame)
-            coverage = Float(capturedKeyframes.count) / Float(requiredKeyframes)
+        // Discretize into buckets for diversity tracking
+        let aziBucket = Int(((azimuth + .pi) / (2 * .pi)) * Float(horizontalBuckets)) % horizontalBuckets
+        let polBucket = Int((polar / .pi) * Float(verticalBuckets)) % verticalBuckets
+        let bucketKey = (aziBucket << 8) | polBucket
+        
+        // If this is a new angle or we need more frames generally
+        if !capturedBuckets.contains(bucketKey) || capturedKeyframes.count < requiredKeyframes {
+            if !capturedBuckets.contains(bucketKey) {
+                capturedBuckets.insert(bucketKey)
+                
+                // Haptic feedback for discovery of new angle
+                let generator = UIImpactFeedbackGenerator(style: .light)
+                generator.impactOccurred()
+            }
             
-            // AG-Splatting Integration (Visualization)
+            capturedKeyframes.append(frame)
+            self.capturedFrameCount = capturedKeyframes.count
+            
+            // Coverage is based on discovered angles vs target diversity
+            // Max potential unique buckets is horizontalBuckets * verticalBuckets
+            // But we only need ~40 for a good splat.
+            coverage = min(Float(capturedBuckets.count) / Float(requiredKeyframes), 1.0)
+            
+            // AG-Splatting Integration (Visualization & Active Guidance)
             Task {
-                // Get sparse points from ARKit as "splats"
+                // Use sparse feature points as proxies for splat density
                 let newSplats = frame.rawFeaturePoints?.points ?? []
                 
-                // Update Engine & Get Guidance
+                // Update Engine & Get Next Best View Vector
                 if let vector = await agentic3DEngine.updateUncertaintyMap(currentCameraPosition: cameraPos, newSplats: newSplats) {
                     await MainActor.run {
                         self.guidanceVector = vector
-                        // Simple check: is vector pointing mostly up, left, right?
-                        if abs(vector.y) > 0.8 {
-                            self.instructions = vector.y > 0 ? "Move Up" : "Move Down"
-                        } else if abs(vector.x) > abs(vector.z) {
-                            self.instructions = vector.x > 0 ? "Move Right" : "Move Left"
-                        } else {
-                            self.instructions = "Orbit Around"
-                        }
+                        
+                        // Smart instruction logic based on guidance vector vs camera look direction
+                        updateInstructions(guidance: vector, cameraPos: cameraPos, target: center)
                     }
                 }
                 
-                // Update Visualization Data
+                // Update Debug Visualization
                 let voxels = await agentic3DEngine.getHighUncertaintyVoxels()
                 await MainActor.run {
                     self.uncertainVoxels = voxels
                 }
             }
             
-            if coverage >= 1.0 {
+            if coverage >= 1.0 && capturedKeyframes.count >= requiredKeyframes {
                 finalizeCapture()
+            }
+        }
+    }
+    
+    private func updateInstructions(guidance: SIMD3<Float>, cameraPos: SIMD3<Float>, target: SIMD3<Float>) {
+        // Guidance vector is in world space. 
+        // We want to translate this into camera-relative instructions.
+        
+        // Vector from camera to object
+        let viewDir = simd_normalize(target - cameraPos)
+        
+        // Project guidance onto horizontal/vertical axes relative to camera
+        // (Simplified logic for now)
+        if abs(guidance.y) > 0.7 {
+            self.instructions = guidance.y > 0 ? "Rise Up" : "Lower Camera"
+        } else {
+            // Check cross product for left/right orbit
+            let cross = simd_cross(viewDir, guidance)
+            if cross.y > 0.3 {
+                self.instructions = "Orbit Right"
+            } else if cross.y < -0.3 {
+                self.instructions = "Orbit Left"
+            } else {
+                self.instructions = "Orbit Slowly"
             }
         }
     }
     
     private func finalizeCapture() {
         self.state = .processing
-        self.instructions = "Training 3D Memory (Local)..."
+        self.instructions = "Finalizing 3D Reconstruction..."
         
-        // Mock the 90s training time for the MVP UI
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+        // Haptic notification for completion
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.success)
+        
+        // Simulated local reconstruction time
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             self.state = .complete
-            self.instructions = "3D Memory Ready"
+            self.instructions = "3D Asset Ready"
         }
     }
 }

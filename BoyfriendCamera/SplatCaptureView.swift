@@ -6,9 +6,8 @@ import Combine
 struct SplatCaptureView: View {
     @Environment(\.dismiss) var dismiss
     @StateObject private var engine = SplatCaptureEngine()
-    
-    // We hold a reference to the ARView to update it from SwiftUI
     @State private var arView: VoxelARView?
+    @State private var showingReview = false
 
     var body: some View {
         ZStack {
@@ -16,94 +15,166 @@ struct SplatCaptureView: View {
             ARViewContainer(engine: engine, arViewBinding: $arView)
                 .edgesIgnoringSafeArea(.all)
             
-            // UI Overlay
+            // Modern HUD Overlay
             VStack {
                 // Top Bar
-                HStack {
+                HStack(alignment: .top) {
                     Button(action: { dismiss() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.title)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 20, weight: .bold))
                             .foregroundColor(.white)
+                            .padding(12)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
                     }
-                    .padding(.trailing, 8)
                     
-                    Text("Director Mode")
-                        .font(.headline)
-                        .padding(8)
-                        .background(.ultraThinMaterial)
-                        .cornerRadius(8)
                     Spacer()
-                    Text(engine.instructions)
-                        .font(.headline)
-                        .foregroundColor(.yellow)
-                        .padding(8)
-                        .background(.black.opacity(0.6))
-                        .cornerRadius(8)
+                    
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("3D CAPTURE")
+                            .font(.system(size: 10, weight: .black))
+                            .tracking(2)
+                            .foregroundColor(.white.opacity(0.6))
+                        
+                        Text(engine.instructions.uppercased())
+                            .font(.system(size: 16, weight: .bold, design: .monospaced))
+                            .foregroundColor(engine.instructions.contains("Too") ? .red : .yellow)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.black.opacity(0.8))
+                            .cornerRadius(4)
+                    }
                 }
-                .padding(.top, 50)
+                .padding(.top, 60)
                 .padding(.horizontal)
                 
                 Spacer()
                 
-                // Debug Visualization (Uncertain Voxels)
-                if !engine.uncertainVoxels.isEmpty {
-                    VStack {
-                        Text("High Uncertainty Zones: \(engine.uncertainVoxels.count)")
-                            .font(.caption)
-                            .foregroundColor(.red)
-                        // Simple compass/arrow guidance
-                        if let guide = engine.guidanceVector {
-                            Image(systemName: "arrow.up")
-                                .rotationEffect(Angle(radians: Double(atan2(guide.x, -guide.y))))
-                                .font(.largeTitle)
-                                .foregroundColor(.yellow)
-                        }
-                    }
-                    .padding()
-                    .background(.ultraThinMaterial)
-                    .cornerRadius(10)
-                    .padding(.bottom, 20)
+                // Guidance Indicator (Active AG-Splatting)
+                if engine.state == .capturing, let guide = engine.guidanceVector {
+                    CaptureGuidanceRing(vector: guide, coverage: engine.coverage)
+                        .frame(width: 200, height: 200)
+                        .padding(.bottom, 40)
                 }
                 
-                // Capture Button
-                Button(action: {
-                    if engine.state == .idle {
-                        // Assume center is 1m in front of camera
-                        if let currentFrame = arView?.session.currentFrame {
-                            let transform = currentFrame.camera.transform
-                            var translation = matrix_identity_float4x4
-                            translation.columns.3.z = -1.0 // 1 meter forward
-                            let center = (transform * translation).columns.3
-                            // engine.startCapture(at: simd_make_float3(center)) 
-                            // TODO: Fix type mismatch if needed, but for now passing simd_float3
-                             engine.startCapture(at: simd_make_float3(center.x, center.y, center.z))
+                // Progress & Controls
+                VStack(spacing: 20) {
+                    if engine.state == .capturing || engine.state == .processing {
+                        VStack(spacing: 8) {
+                            HStack {
+                                Text("COVERAGE")
+                                    .font(.system(size: 10, weight: .bold))
+                                Spacer()
+                                Text("\(Int(engine.coverage * 100))%")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            }
+                            .foregroundColor(.white)
+                            
+                            ProgressView(value: engine.coverage)
+                                .progressViewStyle(LinearProgressViewStyle(tint: .yellow))
+                                .scaleEffect(x: 1, y: 2, anchor: .center)
                         }
+                        .padding(.horizontal, 40)
                     }
-                }) {
-                    ZStack {
-                        Circle()
-                            .stroke(.white, lineWidth: 4)
-                            .frame(width: 80, height: 80)
-                        
-                        Circle()
-                            .fill(engine.state == .capturing ? .red : .white)
-                            .frame(width: 70, height: 70)
+                    
+                    if engine.state == .complete {
+                        Button(action: { showingReview = true }) {
+                            Text("VIEW 3D ASSET")
+                                .font(.system(size: 14, weight: .black))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 30)
+                                .padding(.vertical, 15)
+                                .background(Color.yellow)
+                                .cornerRadius(30)
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    } else if engine.state == .processing {
+                        ProgressView()
+                            .tint(.white)
+                            .scaleEffect(1.5)
+                    } else {
+                        // Capture Button
+                        Button(action: {
+                            if engine.state == .idle {
+                                startCaptureSequence()
+                            }
+                        }) {
+                            ZStack {
+                                Circle()
+                                    .stroke(.white, lineWidth: 3)
+                                    .frame(width: 84, height: 84)
+                                
+                                Circle()
+                                    .fill(engine.state == .capturing ? .red : .white)
+                                    .frame(width: 72, height: 72)
+                                    .scaleEffect(engine.state == .capturing ? 0.8 : 1.0)
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.6), value: engine.state)
+                            }
+                        }
+                        .disabled(engine.state == .processing)
                     }
                 }
-                .padding(.bottom, 40)
+                .padding(.bottom, 50)
             }
         }
-        // Update AR entities when uncertainVoxels changes
+        .sheet(isPresented: $showingReview) {
+            // Mock previewing the result
+            VStack {
+                Text("Splat Preview")
+                    .font(.headline)
+                Spacer()
+                Text("3D Asset generated successfully.")
+                Button("Close") { showingReview = false }
+            }
+            .padding()
+        }
         .onChange(of: engine.uncertainVoxels) { newVoxels in
             arView?.updateVoxelVisualization(voxels: newVoxels)
         }
     }
+    
+    private func startCaptureSequence() {
+        if let currentFrame = arView?.session.currentFrame {
+            let transform = currentFrame.camera.transform
+            var translation = matrix_identity_float4x4
+            translation.columns.3.z = -1.0 // 1m forward
+            let center = (transform * translation).columns.3
+            engine.startCapture(at: simd_make_float3(center.x, center.y, center.z))
+        }
+    }
 }
 
-// Custom ARView to handle RealityKit entities
+struct CaptureGuidanceRing: View {
+    let vector: SIMD3<Float>
+    let coverage: Float
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(.white.opacity(0.2), lineWidth: 2)
+            
+            Circle()
+                .trim(from: 0, to: CGFloat(coverage))
+                .stroke(Color.yellow, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            
+            // Directional Arrow
+            Image(systemName: "chevron.up")
+                .font(.system(size: 30, weight: .black))
+                .foregroundColor(.yellow)
+                .offset(y: -80)
+                .rotationEffect(Angle(radians: Double(atan2(vector.x, -vector.z))))
+            
+            Text("SCAN ZONE")
+                .font(.system(size: 8, weight: .black))
+                .foregroundColor(.white.opacity(0.4))
+        }
+    }
+}
+
+// AR Implementation
 class VoxelARView: ARView {
     private var voxelAnchor: AnchorEntity?
-    private var voxelEntities: [ModelEntity] = []
     
     func setup() {
         let anchor = AnchorEntity(world: .zero)
@@ -113,13 +184,12 @@ class VoxelARView: ARView {
 
     func updateVoxelVisualization(voxels: [SIMD3<Float>]) {
         guard let anchor = voxelAnchor else { return }
-        
         anchor.children.removeAll()
         
-        let mesh = MeshResource.generateBox(size: 0.05) // 5cm boxes
-        let material = SimpleMaterial(color: .red.withAlphaComponent(0.6), isMetallic: false)
+        let mesh = MeshResource.generateBox(size: 0.04)
+        let material = SimpleMaterial(color: .red.withAlphaComponent(0.4), isMetallic: false)
         
-        for position in voxels {
+        for position in voxels.prefix(50) { // Limit for performance
             let entity = ModelEntity(mesh: mesh, materials: [material])
             entity.position = position
             anchor.addChild(entity)
@@ -133,38 +203,22 @@ struct ARViewContainer: UIViewRepresentable {
     
     func makeUIView(context: Context) -> VoxelARView {
         let arView = VoxelARView(frame: .zero)
-        
-        // Configure AR Session
         let config = ARWorldTrackingConfiguration()
-        config.planeDetection = [.horizontal, .vertical]
+        config.planeDetection = [.horizontal]
+        config.environmentTexturing = .automatic
         arView.session.run(config)
-        
         arView.setup()
-        
-        // Set delegate
         arView.session.delegate = context.coordinator
-        
-        // Pass view back
-        DispatchQueue.main.async {
-            self.arViewBinding = arView
-        }
-        
+        DispatchQueue.main.async { self.arViewBinding = arView }
         return arView
     }
     
     func updateUIView(_ uiView: VoxelARView, context: Context) {}
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(engine: engine)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator(engine: engine) }
     
     class Coordinator: NSObject, ARSessionDelegate {
         var engine: SplatCaptureEngine
-        
-        init(engine: SplatCaptureEngine) {
-            self.engine = engine
-        }
-        
+        init(engine: SplatCaptureEngine) { self.engine = engine }
         func session(_ session: ARSession, didUpdate frame: ARFrame) {
             engine.update(with: frame)
         }
