@@ -8,6 +8,7 @@ struct SplatCaptureView: View {
     @StateObject private var engine = SplatCaptureEngine()
     @State private var arView: VoxelARView?
     @State private var showingReview = false
+    @State private var mockSplatData: [SIMD3<Float>] = []
 
     var body: some View {
         ZStack {
@@ -78,7 +79,10 @@ struct SplatCaptureView: View {
                     }
                     
                     if engine.state == .complete {
-                        Button(action: { showingReview = true }) {
+                        Button(action: { 
+                            generateMockSplat()
+                            showingReview = true 
+                        }) {
                             Text("VIEW 3D ASSET")
                                 .font(.system(size: 14, weight: .black))
                                 .foregroundColor(.black)
@@ -117,17 +121,68 @@ struct SplatCaptureView: View {
                 .padding(.bottom, 50)
             }
         }
-        .sheet(isPresented: $showingReview) {
-            // Mock previewing the result
-            VStack {
-                Text("Splat Preview")
-                    .font(.headline)
-                Spacer()
-                Text("3D Asset generated successfully.")
-                Button("Close") { showingReview = false }
+        .fullScreenCover(isPresented: $showingReview) {
+            ZStack {
+                SplatPointRenderer(splatData: mockSplatData)
+                
+                VStack {
+                    HStack {
+                        Button(action: { showingReview = false }) {
+                            Image(systemName: "chevron.left")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(Color.black.opacity(0.5))
+                                .clipShape(Circle())
+                        }
+                        Spacer()
+                        Text("3D PREVIEW")
+                            .font(.system(size: 12, weight: .black))
+                            .foregroundColor(.white)
+                        Spacer()
+                        Button(action: { /* Share action */ }) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(Color.black.opacity(0.5))
+                                .clipShape(Circle())
+                        }
+                    }
+                    .padding(.top, 60)
+                    .padding(.horizontal)
+                    
+                    Spacer()
+                    
+                    Text("SWIPE TO ROTATE")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.bottom, 40)
+                }
             }
-            .padding()
+            .edgesIgnoringSafeArea(.all)
         }
+        .onChange(of: engine.uncertainVoxels) { newVoxels in
+            arView?.updateVoxelVisualization(voxels: newVoxels)
+        }
+    }
+    
+    private func generateMockSplat() {
+        var points: [SIMD3<Float>] = []
+        // Generate a dense sphere of points for the preview
+        for _ in 0..<2000 {
+            let theta = Float.random(in: 0...(2 * .pi))
+            let phi = Float.random(in: 0...(.pi))
+            let r = Float.random(in: 0.4...0.5)
+            
+            let x = r * sin(phi) * cos(theta)
+            let y = r * sin(phi) * sin(theta)
+            let z = r * cos(phi)
+            
+            points.append(SIMD3<Float>(x, y, z))
+        }
+        self.mockSplatData = points
+    }
         .onChange(of: engine.uncertainVoxels) { newVoxels in
             arView?.updateVoxelVisualization(voxels: newVoxels)
         }

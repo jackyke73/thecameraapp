@@ -8,17 +8,9 @@ enum VoiceDirectorState {
     case cooldown
 }
 
-enum DirectorInstructionPriority: Int, Comparable {
-    case low = 0
-    case medium = 1
-    case high = 2
-    case critical = 3
-    
-    static func < (lhs: DirectorInstructionPriority, rhs: DirectorInstructionPriority) -> Bool {
-        return lhs.rawValue < rhs.rawValue
-    }
-}
+// DirectorInstructionPriority is defined in DirectorLogic.swift
 
+@MainActor
 class VoiceDirectorEngine: NSObject, AVSpeechSynthesizerDelegate {
     static let shared = VoiceDirectorEngine()
     
@@ -142,10 +134,11 @@ class VoiceDirectorEngine: NSObject, AVSpeechSynthesizerDelegate {
     
     // MARK: - AVSpeechSynthesizerDelegate
     
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        state = .cooldown
-        // Small buffer after speaking before next one
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            self.state = .cooldown
+            // Small buffer after speaking before next one
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
             if self.state == .cooldown {
                 self.state = .idle
             }

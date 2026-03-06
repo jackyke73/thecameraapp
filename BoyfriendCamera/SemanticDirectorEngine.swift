@@ -225,6 +225,7 @@ actor SemanticDirectorEngine: DirectorEngineProtocol {
         // Creative Overrides
         let now = Date().timeIntervalSince1970
         if now - lastGuidanceChangeTime > 5.0 && score > 0.7 {
+             lastGuidanceChangeTime = now
              if Double.random(in: 0...1) > 0.8 {
                  suggestion = [
                     "Try a lower angle for a heroic look.",

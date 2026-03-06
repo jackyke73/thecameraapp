@@ -645,19 +645,21 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
              // Bind callback once; engine runs asynchronously.
              if aiEngine.onOutputUpdated == nil {
                  aiEngine.onOutputUpdated = { [weak self] out in
-                     guard let self = self else { return }
-                     self.isPersonDetected = out.isPersonDetected
-                     self.peopleCount = out.peopleCount
-                     self.expressions = out.expressions
-                     self.mainFaceBounds = out.mainFaceBounds
+                     Task { @MainActor [weak self] in
+                         guard let self = self else { return }
+                         self.isPersonDetected = out.isPersonDetected
+                         self.peopleCount = out.peopleCount
+                         self.expressions = out.expressions
+                         self.mainFaceBounds = out.mainFaceBounds
 
-                     if let p = out.nosePoint {
-                         self.nosePoint = p
-                         self.lastNoseSeenAt = Date()
-                     } else {
-                         // don't instantly erase; hold briefly
-                         if Date().timeIntervalSince(self.lastNoseSeenAt) > self.noseHoldSeconds {
-                             self.nosePoint = nil
+                         if let p = out.nosePoint {
+                             self.nosePoint = p
+                             self.lastNoseSeenAt = Date()
+                         } else {
+                             // don't instantly erase; hold briefly
+                             if Date().timeIntervalSince(self.lastNoseSeenAt) > self.noseHoldSeconds {
+                                 self.nosePoint = nil
+                             }
                          }
                      }
                  }

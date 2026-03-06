@@ -539,7 +539,7 @@ struct ContentView: View {
                             Color.clear.frame(height: 100)
                         }
 
-                        // --- BOTTOM BAR (Apple style) ---
+                        // --- BOTTOM BAR (Obsidian Style) ---
                         HStack {
                             // Album (bottom-left)
                             Button { showPhotoReview = true } label: {
@@ -547,20 +547,24 @@ struct ContentView: View {
                                     Image(uiImage: image)
                                         .resizable()
                                         .scaledToFill()
-                                        .frame(width: 52, height: 52)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                        .frame(width: 48, height: 48)
+                                        .cornerRadius(12)
                                         .overlay(
-                                            RoundedRectangle(cornerRadius: 10)
-                                                .stroke(Color.white, lineWidth: 2)
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Theme.borderSubtle, lineWidth: 1)
                                         )
                                         .scaleEffect(thumbnailScale)
                                 } else {
-                                    Image(systemName: "photo.stack")
-                                        .font(.title3)
-                                        .foregroundColor(.white)
-                                        .frame(width: 52, height: 52)
-                                        .background(.ultraThinMaterial)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Image(systemName: "photo.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(Theme.textSecondary)
+                                        .frame(width: 48, height: 48)
+                                        .background(Theme.bgTertiary.opacity(0.8))
+                                        .cornerRadius(12)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Theme.borderSubtle, lineWidth: 1)
+                                        )
                                 }
                             }
 
@@ -570,13 +574,13 @@ struct ContentView: View {
                             Button { takePhoto() } label: {
                                 ZStack {
                                     Circle()
-                                        .stroke(.white, lineWidth: 4)
-                                        .frame(width: 78, height: 78)
+                                        .stroke(Theme.accent, lineWidth: 4)
+                                        .frame(width: 72, height: 72)
 
                                     Circle()
-                                        .fill(.white)
-                                        .frame(width: 66, height: 66)
-                                        .scaleEffect(isCapturing ? 0.85 : 1.0)
+                                        .fill(isCapturing ? Theme.accent.opacity(0.8) : Theme.accent)
+                                        .frame(width: 60, height: 60)
+                                        .scaleEffect(isCapturing ? 0.9 : 1.0)
                                 }
                             }
 
@@ -585,14 +589,18 @@ struct ContentView: View {
                             // Flip (bottom-right)
                             Button { cameraManager.switchCamera() } label: {
                                 Image(systemName: "arrow.triangle.2.circlepath")
-                                    .font(.title3)
-                                    .foregroundColor(.white)
-                                    .frame(width: 52, height: 52)
-                                    .background(.ultraThinMaterial)
+                                    .font(.system(size: 20))
+                                    .foregroundColor(Theme.textPrimary)
+                                    .frame(width: 48, height: 48)
+                                    .background(Theme.bgTertiary.opacity(0.8))
                                     .clipShape(Circle())
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Theme.borderSubtle, lineWidth: 1)
+                                    )
                             }
                         }
-                        .padding(.horizontal, 36)
+                        .padding(.horizontal, 40)
                         .padding(.bottom, 40)
                     }
                     .ignoresSafeArea(edges: .top)
@@ -612,210 +620,27 @@ struct ContentView: View {
                     }
 
 
-                    // --- SETTINGS SHEET OVERLAY (on top of everything; does not push layout) ---
+                    // --- SETTINGS SHEET OVERLAY ---
                     if showSettings {
-                        // Leave the top menu bar clickable; block interactions below it.
-                        VStack(spacing: 0) {
-                            Color.clear.frame(height: max(topSafe + 54, topBarGlobalFrame.maxY))
-                            Color.black.opacity(0.001)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                        .ignoresSafeArea()
-                        .zIndex(800)
-
-                        VStack(spacing: 0) {
-                            Color.clear.frame(height: max(topSafe + 54, topBarGlobalFrame.maxY) + 8)
-                            VStack(spacing: 14) {
-                                // Toggles row 1
-                                HStack(spacing: 12) {
-                                    ToggleButton(icon: "grid", label: "Grid", isOn: $isGridEnabled)
-                                    ToggleButton(icon: "gyroscope", label: "Level", isOn: $isLevelerEnabled)
-                                    ToggleButton(icon: "timer", label: "3s Timer", isOn: $isTimerEnabled)
-                                    ToggleButton(icon: "waveform.path.ecg", label: "Haptic", isOn: $isHapticEnabled)
-                                }
-                                
-                                // Toggles row 1.5 (Agentic)
-                                HStack(spacing: 12) {
-                                     ToggleButton(icon: "waveform.circle", label: "Voice", isOn: $isVoiceEnabled)
-                                     Spacer()
-                                }
-
-                                // Toggles row 2
-                                HStack(spacing: 12) {
-                                    ToggleButton(icon: "scope", label: "Lock", isOn: $isLandmarkLockEnabled)
-                                        .onChange(of: isLandmarkLockEnabled) { _, on in
-                                            if !on {
-                                                withAnimation { currentAdvice = nil }
-                                            } else {
-                                                updateNavigationLogic(force: true)
-                                            }
-                                        }
-
-                                    ToggleButton(icon: "sparkles", label: "AI", isOn: $cameraManager.isAIFeaturesEnabled)
-                                    
-                                    // Director Mode (Splatting)
-                                    Button {
-                                        showDirectorMode = true
-                                        showSettings = false
-                                    } label: {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "cube.transparent")
-                                            Text("Splat")
-                                                .font(.caption.bold())
-                                        }
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .background(
-                                            .ultraThinMaterial,
-                                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                                .stroke(Color.white.opacity(0.18), lineWidth: 1)
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    // Smart Shutter Toggle
-                                    ToggleButton(icon: "camera.shutter.button.fill", label: "Auto", isOn: $cameraManager.isSmartShutterEnabled)
-                                }
-
-                                // Floating AI HUD toggle
-                                HStack {
-                                    Spacer()
-                                    ToggleButton(icon: "rectangle.and.hand.point.up.left", label: "HUD", isOn: $showFloatingAIHUD)
-                                    Spacer()
-                                }
-
-                                // Aspect Ratio (moved from the top bar into Settings)
-                                HStack {
-                                    Spacer()
-                                    Button { toggleAspectRatio() } label: {
-                                        Text(currentAspectRatio.rawValue)
-                                            .font(.footnote.bold())
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                            .background(
-                                                .ultraThinMaterial,
-                                                in: Capsule(style: .continuous)
-                                            )
-                                            .overlay(
-                                                Capsule(style: .continuous)
-                                                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
-                                            )
-                                    }
-                                    .buttonStyle(.plain)
-                                    Spacer()
-                                }
-
-                                // Exposure
-                                HStack {
-                                    Image(systemName: "sun.max.fill")
-                                        .font(.caption)
-                                        .foregroundColor(.white)
-                                    Slider(value: $exposureValue, in: -2...2)
-                                        .tint(.yellow)
-                                        .onChange(of: exposureValue) { _, val in
-                                            cameraManager.setExposure(ev: val)
-                                        }
-                                    Text(String(format: "%.1f", exposureValue))
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundColor(.white)
-                                        .frame(width: 34)
-                                }
-
-                                // WB
-                                if cameraManager.isWBSupported {
-                                    HStack {
-                                        Image(systemName: "thermometer")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                        Slider(value: $whiteBalanceValue, in: 3000...8000)
-                                            .tint(.orange)
-                                            .onChange(of: whiteBalanceValue) { _, val in
-                                                cameraManager.setWhiteBalance(kelvin: val)
-                                            }
-                                        Text("\(Int(whiteBalanceValue))K")
-                                            .font(.caption.monospacedDigit())
-                                            .foregroundColor(.white)
-                                            .frame(width: 55)
-                                    }
-                                }
-
-                                // Focus
-                                if cameraManager.isFocusSupported {
-                                    HStack {
-                                        Image(systemName: "flower")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                        Slider(value: $focusValue, in: 0.0...1.0)
-                                            .tint(.cyan)
-                                            .onChange(of: focusValue) { _, val in
-                                                cameraManager.setLensPosition(val)
-                                            }
-                                        Image(systemName: "mountain.2")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                    }
-                                }
-
-                                // Torch
-                                if cameraManager.isTorchSupported {
-                                    HStack {
-                                        Image(systemName: "bolt.slash.fill")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                        Slider(value: $torchValue, in: 0.0...1.0)
-                                            .tint(.white)
-                                            .onChange(of: torchValue) { _, val in
-                                                cameraManager.setTorchLevel(val)
-                                            }
-                                        Image(systemName: "bolt.fill")
-                                            .font(.caption)
-                                            .foregroundColor(.yellow)
-                                    }
-                                }
-
-                                // Reset
-                                Button("Reset All") {
-                                    exposureValue = 0
-                                    whiteBalanceValue = 5500
-                                    focusValue = 0.5
-                                    torchValue = 0.0
-                                    cameraManager.resetSettings()
-                                }
-                                .font(.caption.bold())
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.yellow)
-                                .cornerRadius(8)
-                            }
-                            .padding(14)
-                            .background(
-                                .ultraThinMaterial,
-                                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .stroke(Color.white.opacity(0.22), lineWidth: 1)
-                            )
-                            .shadow(color: Color.black.opacity(0.25), radius: 14, x: 0, y: 6)
-                            .padding(.horizontal)
-                            .zIndex(700)
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                            Spacer()
-                        }
-                        .ignoresSafeArea()
-                        .zIndex(900)
+                        SettingsOverlay(
+                            isPresented: $showSettings,
+                            cameraManager: cameraManager,
+                            isGridEnabled: $isGridEnabled,
+                            isLevelerEnabled: $isLevelerEnabled,
+                            isTimerEnabled: $isTimerEnabled,
+                            isHapticEnabled: $isHapticEnabled,
+                            isVoiceEnabled: $isVoiceEnabled,
+                            isLandmarkLockEnabled: $isLandmarkLockEnabled,
+                            showDirectorMode: $showDirectorMode,
+                            showFloatingAIHUD: $showFloatingAIHUD,
+                            currentAspectRatio: $currentAspectRatio
+                        )
                     }
                 }
                 .navigationDestination(isPresented: $showMap) {
                     MapScreen(locationManager: locationManager, landmark: targetLandmarkBinding)
                 }
-                .sheet(isPresented: $showPhotoReview) {
+                .fullScreenCover(isPresented: $showPhotoReview) {
                     PhotoReviewView()
                 }
                 .fullScreenCover(isPresented: $showDirectorMode) {

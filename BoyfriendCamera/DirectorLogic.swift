@@ -101,8 +101,10 @@ struct DirectorLogic {
         
         // 4. Framing: Center the subject (using nose point)
         if let nose = nosePoint {
-            let dx = nose.x - targetPoint.x
-            let dy = nose.y - targetPoint.y // Remember Y might be inverted depending on view, but magnitude is safe
+            // Mirroring fix: Nose coordinates from Vision are often mirrored compared to preview
+            let mirroredNoseX = 1.0 - nose.x
+            let dx = mirroredNoseX - targetPoint.x
+            let dy = nose.y - targetPoint.y 
             let dist = sqrt(dx*dx + dy*dy)
             
             if dist > alignmentThreshold {

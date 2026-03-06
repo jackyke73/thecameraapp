@@ -10,22 +10,22 @@ struct SmartDirectorHUD: View {
             // Compact Mode (for Top Bar)
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
-                    .foregroundColor(.yellow)
+                    .foregroundColor(Theme.accentWarning)
                 Text(cameraManager.semanticAnalysis.lightingQuality.rawValue)
-                    .font(.caption.bold())
-                    .foregroundColor(.white)
+                    .font(.caption.monospaced().bold())
+                    .foregroundColor(Theme.textPrimary)
                 
                 // Score indicator
                 Circle()
                     .trim(from: 0, to: cameraManager.semanticAnalysis.compositionScore)
-                    .stroke(Color.green, lineWidth: 2)
+                    .stroke(Theme.accentSuccess, lineWidth: 1.5)
                     .frame(width: 14, height: 14)
                     .rotationEffect(.degrees(-90))
-                    .background(Circle().stroke(Color.white.opacity(0.2), lineWidth: 2))
+                    .background(Circle().stroke(Theme.borderSubtle, lineWidth: 1.5))
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(.ultraThinMaterial, in: Capsule())
+            .glassPanel()
         } else {
             // Expanded Mode (Floating HUD)
             VStack(alignment: .leading, spacing: 12) {
@@ -33,11 +33,12 @@ struct SmartDirectorHUD: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("AI DIRECTOR")
-                            .font(.caption2.bold())
-                            .foregroundColor(.gray)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .tracking(1)
+                            .foregroundColor(Theme.textSecondary)
                         Text(cameraManager.semanticAnalysis.sceneDescription)
                             .font(.caption.bold())
-                            .foregroundColor(.white)
+                            .foregroundColor(Theme.textPrimary)
                             .lineLimit(1)
                     }
                     Spacer()
@@ -45,30 +46,31 @@ struct SmartDirectorHUD: View {
                     // Score Ring
                     ZStack {
                         Circle()
-                            .stroke(Color.white.opacity(0.1), lineWidth: 3)
+                            .stroke(Theme.borderSubtle, lineWidth: 2)
                         Circle()
                             .trim(from: 0, to: cameraManager.semanticAnalysis.compositionScore)
                             .stroke(
-                                LinearGradient(colors: [.red, .yellow, .green], startPoint: .top, endPoint: .bottom),
-                                style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                                LinearGradient(colors: [Theme.accentDestructive, Theme.accentWarning, Theme.accentSuccess], startPoint: .top, endPoint: .bottom),
+                                style: StrokeStyle(lineWidth: 2, lineCap: .round)
                             )
                             .rotationEffect(.degrees(-90))
                         
                         Text("\(Int(cameraManager.semanticAnalysis.compositionScore * 100))")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(Theme.textPrimary)
                     }
                     .frame(width: 32, height: 32)
                 }
                 
-                Divider().background(Color.white.opacity(0.2))
+                Divider().background(Theme.borderSubtle)
                 
                 // Lighting
                 HStack {
                     Image(systemName: lightingIcon)
                         .foregroundColor(lightingColor)
+                        .font(.caption)
                     Text(cameraManager.semanticAnalysis.lightingQuality.rawValue)
-                        .font(.footnote.bold())
+                        .font(.footnote.monospaced().bold())
                         .foregroundColor(lightingColor)
                     Spacer()
                 }
@@ -79,35 +81,35 @@ struct SmartDirectorHUD: View {
                         HStack {
                             Image(systemName: score.isStable ? "video.fill" : "video.slash.fill")
                                 .font(.caption2)
-                                .foregroundColor(score.isStable ? .green : .orange)
+                                .foregroundColor(score.isStable ? Theme.accentSuccess : Theme.accentWarning)
                             
                             Text(score.feedback.uppercased())
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(score.isStable ? .green : .orange)
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundColor(score.isStable ? Theme.accentSuccess : Theme.accentWarning)
                             
                             Spacer()
                             
                             Text("\(Int(score.value * 100))%")
                                 .font(.caption2.monospacedDigit())
-                                .foregroundColor(.white.opacity(0.6))
+                                .foregroundColor(Theme.textSecondary)
                         }
                         
                         // Stability Bar
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.white.opacity(0.1))
-                                    .frame(height: 4)
+                                    .fill(Theme.borderSubtle)
+                                    .frame(height: 3)
                                 
                                 Capsule()
-                                    .fill(score.isStable ? Color.green : Color.orange)
-                                    .frame(width: geo.size.width * score.stability, height: 4)
+                                    .fill(score.isStable ? Theme.accentSuccess : Theme.accentWarning)
+                                    .frame(width: geo.size.width * score.stability, height: 3)
                             }
                         }
-                        .frame(height: 4)
+                        .frame(height: 3)
                     }
-                    .padding(8)
-                    .background(Color.black.opacity(0.2))
+                    .padding(10)
+                    .background(Theme.bgTertiary.opacity(0.6))
                     .cornerRadius(8)
                 }
                 
@@ -115,28 +117,28 @@ struct SmartDirectorHUD: View {
                 if let guidance = cameraManager.semanticAnalysis.spatialGuidance {
                     HStack(spacing: 12) {
                         Image(systemName: arrowIcon(for: guidance.action))
-                            .font(.title2)
-                            .foregroundColor(.cyan)
-                            .frame(width: 30)
+                            .font(.title3)
+                            .foregroundColor(Theme.accentInfo)
+                            .frame(width: 24)
                         
                         VStack(alignment: .leading, spacing: 2) {
                             Text(guidance.action.uppercased())
-                                .font(.system(size: 12, weight: .black))
-                                .foregroundColor(.cyan)
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(Theme.accentInfo)
                             if let target = guidance.targetObject {
                                 Text("Target: \(target)")
                                     .font(.caption2)
-                                    .foregroundColor(.white.opacity(0.7))
+                                    .foregroundColor(Theme.textSecondary)
                             }
                         }
                     }
-                    .padding(8)
+                    .padding(10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.cyan.opacity(0.15))
+                    .background(Theme.accentInfo.opacity(0.1))
                     .cornerRadius(8)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.cyan.opacity(0.3), lineWidth: 1)
+                            .stroke(Theme.accentInfo.opacity(0.25), lineWidth: 0.5)
                     )
                 }
                 
@@ -144,28 +146,26 @@ struct SmartDirectorHUD: View {
                 if let suggestion = cameraManager.semanticAnalysis.creativeSuggestion {
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "lightbulb.fill")
-                            .foregroundColor(.yellow)
+                            .foregroundColor(Theme.accentWarning)
                             .font(.caption)
                             .padding(.top, 2)
                         Text(suggestion)
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.9))
+                            .foregroundColor(Theme.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(8)
-                    .background(Color.yellow.opacity(0.1))
+                    .padding(10)
+                    .background(Theme.accentWarning.opacity(0.1))
                     .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.accentWarning.opacity(0.2), lineWidth: 0.5)
+                    )
                 }
             }
-            .padding(12)
-            .frame(width: 220)
-            .background(.ultraThinMaterial)
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 5)
+            .padding(16)
+            .frame(width: 240)
+            .glassPanel()
         }
     }
     
@@ -194,11 +194,11 @@ struct SmartDirectorHUD: View {
     
     private var lightingColor: Color {
         switch cameraManager.semanticAnalysis.lightingQuality {
-        case .good, .studio: return .green
-        case .goldenHour: return .orange
-        case .poor: return .red
-        case .harsh, .tooBright: return .yellow
-        default: return .gray
+        case .good, .studio: return Theme.accentSuccess
+        case .goldenHour: return Theme.accentWarning
+        case .poor: return Theme.accentDestructive
+        case .harsh, .tooBright: return Theme.accentWarning
+        default: return Theme.textSecondary
         }
     }
 }

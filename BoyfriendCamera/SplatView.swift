@@ -1,8 +1,8 @@
 import SwiftUI
 import MetalKit
-import MetalSplatter
-import SplatIO
-import SampleBoxRenderer // For math utilities if needed, or I'll inline them
+// import MetalSplatter
+// import SplatIO
+// import SampleBoxRenderer // For math utilities if needed, or I'll inline them
 
 struct SplatView: UIViewRepresentable {
     let url: URL
@@ -19,6 +19,7 @@ struct SplatView: UIViewRepresentable {
         mtkView.sampleCount = 1
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         
+        /*
         let renderer = SplatViewRenderer(mtkView)
         context.coordinator.renderer = renderer
         mtkView.delegate = renderer
@@ -30,6 +31,7 @@ struct SplatView: UIViewRepresentable {
                 print("Error loading splat: \(error)")
             }
         }
+        */
         
         return mtkView
     }
@@ -43,10 +45,11 @@ struct SplatView: UIViewRepresentable {
     }
     
     class Coordinator {
-        var renderer: SplatViewRenderer?
+        // var renderer: SplatViewRenderer?
     }
 }
 
+/*
 class SplatViewRenderer: NSObject, MTKViewDelegate {
     let device: MTLDevice
     let commandQueue: MTLCommandQueue
@@ -184,3 +187,4 @@ func matrix4x4_rotation(radians: Float, axis: SIMD3<Float>) -> matrix_float4x4 {
         vector_float4(0, 0, 0, 1)
     ))
 }
+*/

@@ -1,5 +1,6 @@
 import Foundation
 import CoreVideo
+import simd
 
 /// Represents a detected 3D object/cluster in a Gaussian Splatting scene.
 struct SplatObject: Identifiable, Sendable {
@@ -28,6 +29,12 @@ struct VoxelKey: Hashable, Sendable {
     let x: Int
     let y: Int
     let z: Int
+    
+    init(x: Int, y: Int, z: Int) {
+        self.x = x
+        self.y = y
+        self.z = z
+    }
 }
 
 struct VoxelInfo: Sendable {
@@ -46,6 +53,8 @@ struct VoxelInfo: Sendable {
         // If density is high but diversity is low, uncertainty is medium.
         return 1.0 - (densityScore * 0.7 + diversityScore * 0.3)
     }
+    
+    init() {} 
 }
 
 /// The Agentic3DEngine is responsible for bridging 2D images with 3D Gaussian Splatting spatial understanding.
@@ -54,11 +63,12 @@ actor Agentic3DEngine {
     private let isExperimental: Bool = true
     
     // Active Guidance State
-    private var voxelGrid: [VoxelKey: VoxelInfo] = [:]
+    private var voxelGrid: [VoxelKey: VoxelInfo]
     private let voxelSize: Float = 0.1 // 10cm voxels
     
     init() {
         print("Agentic3DEngine: Initializing Spatial Reasoning Systems...")
+        self.voxelGrid = [:]
     }
     
     /// Projects 2D detections into 3D space using depth data (FastViT/DepthAnything) 
@@ -100,7 +110,7 @@ actor Agentic3DEngine {
             info.splatCount += 1
             
             // Calculate view octant (simplified view direction)
-            let viewDir = normalize(splatPos - currentCameraPosition)
+            let viewDir = simd_normalize(splatPos - currentCameraPosition)
             let octant = getOctant(viewDir)
             info.visitedViewOctants |= (1 << octant)
             
@@ -131,7 +141,7 @@ actor Agentic3DEngine {
         // 3. Generate Guidance Vector (Move towards target position's "unseen" side)
         // Ideally, we'd solve for the view direction that maximizes entropy reduction.
         // Simple heuristic: Move towards the centroid.
-        let guidanceVector = normalize(targetPos - currentCameraPosition)
+        let guidanceVector = simd_normalize(targetPos - currentCameraPosition)
         return guidanceVector
     }
     

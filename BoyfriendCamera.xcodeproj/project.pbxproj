@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		90A97A272F5825280031085D /* MetalSplatter in Frameworks */ = {isa = PBXBuildFile; productRef = 90A97A262F5825280031085D /* MetalSplatter */; };
+		90A97A292F5825280031085D /* PLYIO in Frameworks */ = {isa = PBXBuildFile; productRef = 90A97A282F5825280031085D /* PLYIO */; };
+		90A97A2B2F5825280031085D /* SampleBoxRenderer in Frameworks */ = {isa = PBXBuildFile; productRef = 90A97A2A2F5825280031085D /* SampleBoxRenderer */; };
+		90A97A2D2F5825280031085D /* SplatIO in Frameworks */ = {isa = PBXBuildFile; productRef = 90A97A2C2F5825280031085D /* SplatIO */; };
+		90A97A2F2F5825280031085D /* SplatConverter in Frameworks */ = {isa = PBXBuildFile; productRef = 90A97A2E2F5825280031085D /* SplatConverter */; };
 		EAF978742EF934CE00B221C1 /* CNNEmotions_2.mlmodel in Sources */ = {isa = PBXBuildFile; fileRef = EAF978732EF934CE00B221C1 /* CNNEmotions_2.mlmodel */; };
 /* End PBXBuildFile section */
 
@@ -122,6 +127,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				90A97A2F2F5825280031085D /* SplatConverter in Frameworks */,
+				90A97A292F5825280031085D /* PLYIO in Frameworks */,
+				90A97A2B2F5825280031085D /* SampleBoxRenderer in Frameworks */,
+				90A97A272F5825280031085D /* MetalSplatter in Frameworks */,
+				90A97A2D2F5825280031085D /* SplatIO in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -187,6 +197,11 @@
 			);
 			name = BoyfriendCamera;
 			packageProductDependencies = (
+				90A97A262F5825280031085D /* MetalSplatter */,
+				90A97A282F5825280031085D /* PLYIO */,
+				90A97A2A2F5825280031085D /* SampleBoxRenderer */,
+				90A97A2C2F5825280031085D /* SplatIO */,
+				90A97A2E2F5825280031085D /* SplatConverter */,
 			);
 			productName = BoyfriendCamera;
 			productReference = EA93315A2ECEB76F00AD97A9 /* BoyfriendCamera.app */;
@@ -270,6 +285,9 @@
 			);
 			mainGroup = EA9331512ECEB76F00AD97A9;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				90A97A252F5825280031085D /* XCRemoteSwiftPackageReference "MetalSplatter" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EA93315B2ECEB76F00AD97A9 /* Products */;
 			projectDirPath = "";
@@ -699,6 +717,45 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		90A97A252F5825280031085D /* XCRemoteSwiftPackageReference "MetalSplatter" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/scier/MetalSplatter";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		90A97A262F5825280031085D /* MetalSplatter */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 90A97A252F5825280031085D /* XCRemoteSwiftPackageReference "MetalSplatter" */;
+			productName = MetalSplatter;
+		};
+		90A97A282F5825280031085D /* PLYIO */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 90A97A252F5825280031085D /* XCRemoteSwiftPackageReference "MetalSplatter" */;
+			productName = PLYIO;
+		};
+		90A97A2A2F5825280031085D /* SampleBoxRenderer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 90A97A252F5825280031085D /* XCRemoteSwiftPackageReference "MetalSplatter" */;
+			productName = SampleBoxRenderer;
+		};
+		90A97A2C2F5825280031085D /* SplatIO */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 90A97A252F5825280031085D /* XCRemoteSwiftPackageReference "MetalSplatter" */;
+			productName = SplatIO;
+		};
+		90A97A2E2F5825280031085D /* SplatConverter */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 90A97A252F5825280031085D /* XCRemoteSwiftPackageReference "MetalSplatter" */;
+			productName = SplatConverter;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EA9331522ECEB76F00AD97A9 /* Project object */;
 }

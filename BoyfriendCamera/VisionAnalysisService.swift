@@ -7,9 +7,12 @@ import SwiftUI
 // A robust service to extract visual features using Apple's Vision framework.
 // This acts as the "eyes" for the SemanticDirectorEngine, providing real data
 // instead of mocked random values.
-class VisionAnalysisService {
+final class VisionAnalysisService: Sendable {
     
     // Vision Requests (reusable to avoid allocation overhead)
+    // VNRequests are generally thread-safe to create, but not to perform concurrently on the same instance?
+    // Actually, documentation says "You can use the same request in multiple image request handlers simultaneously."
+    // So making them Sendable is okay if we don't mutate them.
     private let faceDetectionRequest: VNDetectFaceRectanglesRequest
     private let textDetectionRequest: VNRecognizeTextRequest
     private let personSegmentationRequest: VNGeneratePersonSegmentationRequest
@@ -40,35 +43,39 @@ class VisionAnalysisService {
         
         // 0. Brightness Analysis (Luma Extraction)
         var brightness: Float = 0.5
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        
+        // Use a nested scope for lock/unlock to ensure unlock happens BEFORE Vision request
+        do {
+            CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
-        if CVPixelBufferGetPlaneCount(pixelBuffer) > 0 {
-             let baseAddress = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) // Y-Plane
-             let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
-             let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
-             let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
-             
-             // Sample center 10x10 area for quick check or whole image stride for accuracy
-             // Let's do a stride sample (every 10th pixel) for speed
-             if let buffer = baseAddress?.assumingMemoryBound(to: UInt8.self) {
-                 var totalLuma: UInt64 = 0
-                 var count: UInt64 = 0
+            if CVPixelBufferGetPlaneCount(pixelBuffer) > 0 {
+                 let baseAddress = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) // Y-Plane
+                 let width = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
+                 let height = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
+                 let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
                  
-                 let step = 8 // Skip pixels for performance
-                 for y in stride(from: 0, to: height, by: step) {
-                     let rowStart = y * bytesPerRow
-                     for x in stride(from: 0, to: width, by: step) {
-                         totalLuma += UInt64(buffer[rowStart + x])
-                         count += 1
+                 // Sample center 10x10 area for quick check or whole image stride for accuracy
+                 // Let's do a stride sample (every 10th pixel) for speed
+                 if let buffer = baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                     var totalLuma: UInt64 = 0
+                     var count: UInt64 = 0
+                     
+                     let step = 8 // Skip pixels for performance
+                     for y in stride(from: 0, to: height, by: step) {
+                         let rowStart = y * bytesPerRow
+                         for x in stride(from: 0, to: width, by: step) {
+                             totalLuma += UInt64(buffer[rowStart + x])
+                             count += 1
+                         }
+                     }
+                     
+                     if count > 0 {
+                         brightness = Float(totalLuma) / Float(count) / 255.0
                      }
                  }
-                 
-                 if count > 0 {
-                     brightness = Float(totalLuma) / Float(count) / 255.0
-                 }
-             }
-        }
+            }
+        } // Unlock happens here
 
         do {
             // Run requests synchronously (this should be called on a background queue)
