@@ -22,6 +22,8 @@ class SplatCaptureEngine: ObservableObject {
     @Published var uncertainVoxels: [SIMD3<Float>] = [] // For visualization
     @Published var guidanceVector: SIMD3<Float>? = nil // Direction to move
     @Published var capturedFrameCount: Int = 0
+    @Published var showCoachingPrompt: Bool = false
+    @Published var coachingMessage: String = ""
 
     private var capturedKeyframes: [ARFrame] = []
     private var centerPoint: simd_float3?
@@ -34,6 +36,11 @@ class SplatCaptureEngine: ObservableObject {
     
     // Dependencies
     private let agentic3DEngine = Agentic3DEngine()
+    
+    // Coaching State
+    private var lastGuidanceTime: Date = Date()
+    private var stagnationCount: Int = 0
+    private var previousCoverage: Float = 0.0
     
     func startCapture(at center: simd_float3) {
         self.centerPoint = center
@@ -62,6 +69,9 @@ class SplatCaptureEngine: ObservableObject {
         let direction = cameraPos - center
         let distance = simd_length(direction)
         
+        // Stagnation / Drift Check
+        checkCaptureStagnation(currentCoverage: coverage)
+
         // Distance check: Stay within a reasonable capture range (0.3m to 3.0m)
         if distance < 0.3 {
             self.instructions = "Too Close - Move Back"
@@ -124,6 +134,45 @@ class SplatCaptureEngine: ObservableObject {
                 finalizeCapture()
             }
         }
+    }
+    
+    private func checkCaptureStagnation(currentCoverage: Float) {
+        let now = Date()
+        
+        // If coverage hasn't increased in 3 seconds of active scanning
+        if currentCoverage <= previousCoverage {
+            stagnationCount += 1
+        } else {
+            stagnationCount = 0
+            previousCoverage = currentCoverage
+            if showCoachingPrompt {
+                DispatchQueue.main.async { self.showCoachingPrompt = false }
+            }
+        }
+        
+        // Trigger coaching if stuck or time-based nudge
+        if stagnationCount > 180 { // Approx 3 seconds at 60fps
+            triggerCoaching(message: "Change your height or orbit faster")
+            stagnationCount = 0
+        }
+    }
+    
+    private func triggerCoaching(message: String) {
+        DispatchQueue.main.async {
+            self.coachingMessage = message
+            self.showCoachingPrompt = true
+            
+            // Auto-hide after 3 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                if self.coachingMessage == message {
+                    self.showCoachingPrompt = false
+                }
+            }
+        }
+        
+        // Haptic nudge
+        let generator = UISelectionFeedbackGenerator()
+        generator.selectionChanged()
     }
     
     private func updateInstructions(guidance: SIMD3<Float>, cameraPos: SIMD3<Float>, target: SIMD3<Float>) {

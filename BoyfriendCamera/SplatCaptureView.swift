@@ -56,6 +56,22 @@ struct SplatCaptureView: View {
                     CaptureGuidanceRing(vector: guide, coverage: engine.coverage)
                         .frame(width: 200, height: 200)
                         .padding(.bottom, 40)
+                        .overlay(
+                            VStack {
+                                if engine.showCoachingPrompt {
+                                    Text(engine.coachingMessage.uppercased())
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundColor(.black)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .background(Color.yellow)
+                                        .cornerRadius(4)
+                                        .transition(.opacity.combined(with: .offset(y: 10)))
+                                        .animation(.easeInOut, value: engine.showCoachingPrompt)
+                                }
+                            }
+                            .offset(y: 60)
+                        )
                 }
                 
                 // Progress & Controls

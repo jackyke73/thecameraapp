@@ -180,6 +180,21 @@ actor Agentic3DEngine {
         return octant
     }
 
+    /// Calculates a focus-weighted guidance vector for AG-Splatting.
+    /// This identifies the largest "gap" in the sphere of coverage and points towards it.
+    func calculateStrategicGuidance(cameraPos: SIMD3<Float>, targetPos: SIMD3<Float>) -> SIMD3<Float> {
+        // Find high entropy zones relative to the camera
+        let highUncertainty = getHighUncertaintyVoxels()
+        
+        if highUncertainty.isEmpty {
+            // Default to simple orbit
+            return simd_normalize(targetPos - cameraPos)
+        }
+        
+        // Find the centroid of the MOST uncertain region
+        let centroid = highUncertainty.reduce(SIMD3<Float>(0,0,0), +) / Float(highUncertainty.count)
+        return simd_normalize(centroid - cameraPos)
+    }
 
     /// Suggests how to "fix" the 3D scene by moving objects (The "Agentic Photographer" mode).
     func suggest3DAdjustments(objects: [SplatObject]) -> [SplatAction] {
