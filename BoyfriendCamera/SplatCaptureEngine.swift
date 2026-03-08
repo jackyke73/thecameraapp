@@ -24,6 +24,7 @@ class SplatCaptureEngine: ObservableObject {
     @Published var capturedFrameCount: Int = 0
     @Published var showCoachingPrompt: Bool = false
     @Published var coachingMessage: String = ""
+    @Published var capturedSplatPoints: [SIMD3<Float>] = [] // Real points for preview
 
     private var capturedKeyframes: [ARFrame] = []
     private var centerPoint: simd_float3?
@@ -47,6 +48,7 @@ class SplatCaptureEngine: ObservableObject {
         self.state = .capturing
         self.capturedKeyframes = []
         self.capturedBuckets = []
+        self.capturedSplatPoints = []
         self.coverage = 0.0
         self.capturedFrameCount = 0
         self.instructions = "Slowly orbit the object"
@@ -102,6 +104,18 @@ class SplatCaptureEngine: ObservableObject {
             
             capturedKeyframes.append(frame)
             self.capturedFrameCount = capturedKeyframes.count
+            
+            // Extract feature points for point-cloud preview (local space)
+            if let points = frame.rawFeaturePoints?.points {
+                let localPoints = points.map { $0 - center }
+                DispatchQueue.main.async {
+                    self.capturedSplatPoints.append(contentsOf: localPoints)
+                    // Keep preview count manageable (e.g., 5000 points)
+                    if self.capturedSplatPoints.count > 5000 {
+                        self.capturedSplatPoints.removeFirst(localPoints.count)
+                    }
+                }
+            }
             
             // Coverage is based on discovered angles vs target diversity
             // Max potential unique buckets is horizontalBuckets * verticalBuckets

@@ -96,7 +96,6 @@ struct SplatCaptureView: View {
                     
                     if engine.state == .complete {
                         Button(action: { 
-                            generateMockSplat()
                             showingReview = true 
                         }) {
                             Text("VIEW 3D ASSET")
@@ -139,7 +138,7 @@ struct SplatCaptureView: View {
         }
         .fullScreenCover(isPresented: $showingReview) {
             ZStack {
-                SplatPointRenderer(splatData: mockSplatData)
+                SplatPointRenderer(splatData: engine.capturedSplatPoints)
                 
                 VStack {
                     HStack {
@@ -178,27 +177,6 @@ struct SplatCaptureView: View {
             }
             .edgesIgnoringSafeArea(.all)
         }
-        .onChange(of: engine.uncertainVoxels) { newVoxels in
-            arView?.updateVoxelVisualization(voxels: newVoxels)
-        }
-    }
-    
-    private func generateMockSplat() {
-        var points: [SIMD3<Float>] = []
-        // Generate a dense sphere of points for the preview
-        for _ in 0..<2000 {
-            let theta = Float.random(in: 0...(2 * .pi))
-            let phi = Float.random(in: 0...(.pi))
-            let r = Float.random(in: 0.4...0.5)
-            
-            let x = r * sin(phi) * cos(theta)
-            let y = r * sin(phi) * sin(theta)
-            let z = r * cos(phi)
-            
-            points.append(SIMD3<Float>(x, y, z))
-        }
-        self.mockSplatData = points
-    }
         .onChange(of: engine.uncertainVoxels) { newVoxels in
             arView?.updateVoxelVisualization(voxels: newVoxels)
         }
