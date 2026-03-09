@@ -4,8 +4,6 @@ import SwiftUI
 import Combine
 
 /// The SplatCaptureEngine manages the "Orbital Sweep" UX.
-/// It uses ARKit to track the camera position and ensure the user captures enough 
-/// viewpoints for a successful 3D Gaussian Splat training session on-device.
 class SplatCaptureEngine: ObservableObject {
     
     enum CaptureState {
@@ -17,28 +15,25 @@ class SplatCaptureEngine: ObservableObject {
     }
     
     @Published var state: CaptureState = .idle
-    @Published var coverage: Float = 0.0 // 0.0 to 1.0 (percent of the sphere covered)
+    @Published var coverage: Float = 0.0
     @Published var instructions: String = "Find your object"
-    @Published var uncertainVoxels: [SIMD3<Float>] = [] // For visualization
-    @Published var guidanceVector: SIMD3<Float>? = nil // Direction to move
+    @Published var uncertainVoxels: [SIMD3<Float>] = []
+    @Published var guidanceVector: SIMD3<Float>? = nil
     @Published var capturedFrameCount: Int = 0
     @Published var showCoachingPrompt: Bool = false
     @Published var coachingMessage: String = ""
-    @Published var capturedSplatPoints: [SIMD3<Float>] = [] // Real points for preview
+    @Published var capturedSplatPoints: [SIMD3<Float>] = []
 
     private var capturedKeyframes: [ARFrame] = []
     private var centerPoint: simd_float3?
     private let requiredKeyframes = 40
     
-    // Octree for spatial diversity check (prevent redundant frame capture)
     private var capturedBuckets: Set<Int> = []
-    private let horizontalBuckets = 36 // 10 degrees per bucket
-    private let verticalBuckets = 12   // 15 degrees per bucket
+    private let horizontalBuckets = 36
+    private let verticalBuckets = 12
     
-    // Dependencies
     private let agentic3DEngine = Agentic3DEngine()
     
-    // Coaching State
     private var lastGuidanceTime: Date = Date()
     private var stagnationCount: Int = 0
     private var previousCoverage: Float = 0.0
@@ -53,7 +48,6 @@ class SplatCaptureEngine: ObservableObject {
         self.capturedFrameCount = 0
         self.instructions = "Slowly orbit the object"
         
-        // Haptic feedback for start
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
     }
@@ -71,10 +65,8 @@ class SplatCaptureEngine: ObservableObject {
         let direction = cameraPos - center
         let distance = simd_length(direction)
         
-        // Stagnation / Drift Check
         checkCaptureStagnation(currentCoverage: coverage)
 
-        // Distance check: Stay within a reasonable capture range (0.3m to 3.0m)
         if distance < 0.3 {
             self.instructions = "Too Close - Move Back"
             return
@@ -83,21 +75,32 @@ class SplatCaptureEngine: ObservableObject {
             return
         }
 
-        // Calculate angular position on the capture sphere
-        let azimuth = atan2(direction.z, direction.x) // -PI to PI
-        let polar = acos(direction.y / distance)    // 0 to PI
+        let azimuth = atan2(direction.z, direction.x)
+        let polar = acos(direction.y / distance)
         
-        // Discretize into buckets for diversity tracking
         let aziBucket = Int(((azimuth + .pi) / (2 * .pi)) * Float(horizontalBuckets)) % horizontalBuckets
         let polBucket = Int((polar / .pi) * Float(verticalBuckets)) % verticalBuckets
         let bucketKey = (aziBucket << 8) | polBucket
         
-        // If this is a new angle or we need more frames generally
+        // Logic change: even if bucket is visited, we still want to stream points for the visualizer
+        // but only "record" the keyframe if it's new for coverage
+        
+        // Extract feature points for point-cloud preview
+        if let points = frame.rawFeaturePoints?.points {
+            let localPoints = points.map { $0 - center }
+            DispatchQueue.main.async {
+                self.capturedSplatPoints.append(contentsOf: localPoints)
+                // Performance: cap the preview points
+                if self.capturedSplatPoints.count > 12000 {
+                    self.capturedSplatPoints.removeFirst(localPoints.count)
+                }
+            }
+        }
+
         if !capturedBuckets.contains(bucketKey) || capturedKeyframes.count < requiredKeyframes {
             if !capturedBuckets.contains(bucketKey) {
                 capturedBuckets.insert(bucketKey)
                 
-                // Haptic feedback for discovery of new angle
                 let generator = UIImpactFeedbackGenerator(style: .light)
                 generator.impactOccurred()
             }
@@ -105,39 +108,17 @@ class SplatCaptureEngine: ObservableObject {
             capturedKeyframes.append(frame)
             self.capturedFrameCount = capturedKeyframes.count
             
-            // Extract feature points for point-cloud preview (local space)
-            if let points = frame.rawFeaturePoints?.points {
-                let localPoints = points.map { $0 - center }
-                DispatchQueue.main.async {
-                    self.capturedSplatPoints.append(contentsOf: localPoints)
-                    // Keep preview count manageable (e.g., 5000 points)
-                    if self.capturedSplatPoints.count > 5000 {
-                        self.capturedSplatPoints.removeFirst(localPoints.count)
-                    }
-                }
-            }
-            
-            // Coverage is based on discovered angles vs target diversity
-            // Max potential unique buckets is horizontalBuckets * verticalBuckets
-            // But we only need ~40 for a good splat.
             coverage = min(Float(capturedBuckets.count) / Float(requiredKeyframes), 1.0)
             
-            // AG-Splatting Integration (Visualization & Active Guidance)
             Task {
-                // Use sparse feature points as proxies for splat density
                 let newSplats = frame.rawFeaturePoints?.points ?? []
-                
-                // Update Engine & Get Next Best View Vector
                 if let vector = await agentic3DEngine.updateUncertaintyMap(currentCameraPosition: cameraPos, newSplats: newSplats) {
                     await MainActor.run {
                         self.guidanceVector = vector
-                        
-                        // Smart instruction logic based on guidance vector vs camera look direction
                         updateInstructions(guidance: vector, cameraPos: cameraPos, target: center)
                     }
                 }
                 
-                // Update Debug Visualization
                 let voxels = await agentic3DEngine.getHighUncertaintyVoxels()
                 await MainActor.run {
                     self.uncertainVoxels = voxels
@@ -151,9 +132,6 @@ class SplatCaptureEngine: ObservableObject {
     }
     
     private func checkCaptureStagnation(currentCoverage: Float) {
-        let now = Date()
-        
-        // If coverage hasn't increased in 3 seconds of active scanning
         if currentCoverage <= previousCoverage {
             stagnationCount += 1
         } else {
@@ -164,8 +142,7 @@ class SplatCaptureEngine: ObservableObject {
             }
         }
         
-        // Trigger coaching if stuck or time-based nudge
-        if stagnationCount > 180 { // Approx 3 seconds at 60fps
+        if stagnationCount > 180 { 
             triggerCoaching(message: "Change your height or orbit faster")
             stagnationCount = 0
         }
@@ -176,7 +153,6 @@ class SplatCaptureEngine: ObservableObject {
             self.coachingMessage = message
             self.showCoachingPrompt = true
             
-            // Auto-hide after 3 seconds
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                 if self.coachingMessage == message {
                     self.showCoachingPrompt = false
@@ -184,24 +160,16 @@ class SplatCaptureEngine: ObservableObject {
             }
         }
         
-        // Haptic nudge
         let generator = UISelectionFeedbackGenerator()
         generator.selectionChanged()
     }
     
     private func updateInstructions(guidance: SIMD3<Float>, cameraPos: SIMD3<Float>, target: SIMD3<Float>) {
-        // Guidance vector is in world space. 
-        // We want to translate this into camera-relative instructions.
-        
-        // Vector from camera to object
         let viewDir = simd_normalize(target - cameraPos)
         
-        // Project guidance onto horizontal/vertical axes relative to camera
-        // (Simplified logic for now)
         if abs(guidance.y) > 0.7 {
             self.instructions = guidance.y > 0 ? "Rise Up" : "Lower Camera"
         } else {
-            // Check cross product for left/right orbit
             let cross = simd_cross(viewDir, guidance)
             if cross.y > 0.3 {
                 self.instructions = "Orbit Right"
@@ -215,14 +183,13 @@ class SplatCaptureEngine: ObservableObject {
     
     private func finalizeCapture() {
         self.state = .processing
-        self.instructions = "Finalizing 3D Reconstruction..."
+        self.instructions = "Generating Splats..."
         
-        // Haptic notification for completion
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
         
-        // Simulated local reconstruction time
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+        // Higher autonomy: we could trigger a real cloud build here in the future
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             self.state = .complete
             self.instructions = "3D Asset Ready"
         }

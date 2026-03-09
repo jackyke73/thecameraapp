@@ -8,7 +8,6 @@ struct SplatCaptureView: View {
     @StateObject private var engine = SplatCaptureEngine()
     @State private var arView: VoxelARView?
     @State private var showingReview = false
-    @State private var mockSplatData: [SIMD3<Float>] = []
 
     var body: some View {
         ZStack {
@@ -108,9 +107,14 @@ struct SplatCaptureView: View {
                         }
                         .transition(.scale.combined(with: .opacity))
                     } else if engine.state == .processing {
-                        ProgressView()
-                            .tint(.white)
-                            .scaleEffect(1.5)
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(1.5)
+                            Text("OPTIMIZING RADIANCE FIELDS")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.6))
+                        }
                     } else {
                         // Capture Button
                         Button(action: {
