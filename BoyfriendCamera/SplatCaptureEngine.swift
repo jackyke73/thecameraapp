@@ -23,6 +23,7 @@ class SplatCaptureEngine: ObservableObject {
     @Published var showCoachingPrompt: Bool = false
     @Published var coachingMessage: String = ""
     @Published var capturedSplatPoints: [SIMD3<Float>] = []
+    @Published var totalPointsInWorld: Int = 0
 
     private var capturedKeyframes: [ARFrame] = []
     private var centerPoint: simd_float3?
@@ -33,6 +34,7 @@ class SplatCaptureEngine: ObservableObject {
     private let verticalBuckets = 12
     
     private let agentic3DEngine = Agentic3DEngine()
+    private let worldMap = SplatWorldMap()
     
     private var lastGuidanceTime: Date = Date()
     private var stagnationCount: Int = 0
@@ -44,9 +46,14 @@ class SplatCaptureEngine: ObservableObject {
         self.capturedKeyframes = []
         self.capturedBuckets = []
         self.capturedSplatPoints = []
+        self.totalPointsInWorld = 0
         self.coverage = 0.0
         self.capturedFrameCount = 0
         self.instructions = "Slowly orbit the object"
+        
+        Task {
+            await worldMap.reset()
+        }
         
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
@@ -82,16 +89,32 @@ class SplatCaptureEngine: ObservableObject {
         let polBucket = Int((polar / .pi) * Float(verticalBuckets)) % verticalBuckets
         let bucketKey = (aziBucket << 8) | polBucket
         
-        // Logic change: even if bucket is visited, we still want to stream points for the visualizer
-        // but only "record" the keyframe if it's new for coverage
-        
         // Extract feature points for point-cloud preview
         if let points = frame.rawFeaturePoints?.points {
             let localPoints = points.map { $0 - center }
+            
+            // Integrate into the World Map for smarter guidance
+            Task {
+                await worldMap.integrate(points: localPoints, cameraPos: cameraPos - center)
+                
+                if let vector = await worldMap.getPathToGaps(cameraPos: cameraPos - center) {
+                    await MainActor.run {
+                        self.guidanceVector = vector
+                        updateInstructions(guidance: vector, cameraPos: cameraPos, target: center)
+                    }
+                }
+                
+                let voxels = await worldMap.findHighUncertaintyCentroids()
+                await MainActor.run {
+                    self.uncertainVoxels = voxels
+                }
+            }
+
             DispatchQueue.main.async {
                 self.capturedSplatPoints.append(contentsOf: localPoints)
-                // Performance: cap the preview points
-                if self.capturedSplatPoints.count > 12000 {
+                self.totalPointsInWorld += localPoints.count
+                // Performance: cap the preview points but keep it dense enough
+                if self.capturedSplatPoints.count > 15000 {
                     self.capturedSplatPoints.removeFirst(localPoints.count)
                 }
             }
@@ -109,21 +132,6 @@ class SplatCaptureEngine: ObservableObject {
             self.capturedFrameCount = capturedKeyframes.count
             
             coverage = min(Float(capturedBuckets.count) / Float(requiredKeyframes), 1.0)
-            
-            Task {
-                let newSplats = frame.rawFeaturePoints?.points ?? []
-                if let vector = await agentic3DEngine.updateUncertaintyMap(currentCameraPosition: cameraPos, newSplats: newSplats) {
-                    await MainActor.run {
-                        self.guidanceVector = vector
-                        updateInstructions(guidance: vector, cameraPos: cameraPos, target: center)
-                    }
-                }
-                
-                let voxels = await agentic3DEngine.getHighUncertaintyVoxels()
-                await MainActor.run {
-                    self.uncertainVoxels = voxels
-                }
-            }
             
             if coverage >= 1.0 && capturedKeyframes.count >= requiredKeyframes {
                 finalizeCapture()

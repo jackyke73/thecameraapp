@@ -36,6 +36,15 @@ struct SplatCaptureView: View {
                             .tracking(2)
                             .foregroundColor(.white.opacity(0.6))
                         
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(.red)
+                                .frame(width: 6, height: 6)
+                            Text("\(engine.totalPointsInWorld) PTS")
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.8))
+                        }
+                        
                         Text(engine.instructions.uppercased())
                             .font(.system(size: 16, weight: .bold, design: .monospaced))
                             .foregroundColor(engine.instructions.contains("Too") ? .red : .yellow)
