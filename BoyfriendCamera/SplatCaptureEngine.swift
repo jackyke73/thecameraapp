@@ -4,6 +4,7 @@ import SwiftUI
 import Combine
 
 /// The SplatCaptureEngine manages the "Orbital Sweep" UX.
+/// It uses "Active Guidance" to prompt the user to fill coverage gaps in 3D.
 class SplatCaptureEngine: ObservableObject {
     
     enum CaptureState {
@@ -33,7 +34,6 @@ class SplatCaptureEngine: ObservableObject {
     private let horizontalBuckets = 36
     private let verticalBuckets = 12
     
-    private let agentic3DEngine = Agentic3DEngine()
     private let worldMap = SplatWorldMap()
     
     private var lastGuidanceTime: Date = Date()
@@ -196,7 +196,6 @@ class SplatCaptureEngine: ObservableObject {
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
         
-        // Higher autonomy: we could trigger a real cloud build here in the future
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             self.state = .complete
             self.instructions = "3D Asset Ready"
