@@ -28,7 +28,7 @@ class SplatCaptureEngine: ObservableObject {
 
     private var capturedKeyframes: [ARFrame] = []
     private var centerPoint: simd_float3?
-    private let requiredKeyframes = 40
+    private let requiredKeyframes = 60 // Increased for better quality
     
     private var capturedBuckets: Set<Int> = []
     private let horizontalBuckets = 36
@@ -74,10 +74,10 @@ class SplatCaptureEngine: ObservableObject {
         
         checkCaptureStagnation(currentCoverage: coverage)
 
-        if distance < 0.3 {
+        if distance < 0.4 {
             self.instructions = "Too Close - Move Back"
             return
-        } else if distance > 3.0 {
+        } else if distance > 2.5 {
             self.instructions = "Too Far - Get Closer"
             return
         }
@@ -111,27 +111,40 @@ class SplatCaptureEngine: ObservableObject {
             }
 
             DispatchQueue.main.async {
-                self.capturedSplatPoints.append(contentsOf: localPoints)
-                self.totalPointsInWorld += localPoints.count
-                // Performance: cap the preview points but keep it dense enough
-                if self.capturedSplatPoints.count > 15000 {
-                    self.capturedSplatPoints.removeFirst(localPoints.count)
+                // Filter points that are too far from the center to keep it clean
+                let filteredPoints = localPoints.filter { simd_length($0) < 1.5 }
+                self.capturedSplatPoints.append(contentsOf: filteredPoints)
+                self.totalPointsInWorld += filteredPoints.count
+                
+                // Performance: cap the preview points
+                if self.capturedSplatPoints.count > 25000 {
+                    self.capturedSplatPoints.removeFirst(filteredPoints.count)
                 }
             }
         }
 
-        if !capturedBuckets.contains(bucketKey) || capturedKeyframes.count < requiredKeyframes {
-            if !capturedBuckets.contains(bucketKey) {
+        let isNewBucket = !capturedBuckets.contains(bucketKey)
+        if isNewBucket || capturedKeyframes.count < requiredKeyframes {
+            if isNewBucket {
                 capturedBuckets.insert(bucketKey)
                 
                 let generator = UIImpactFeedbackGenerator(style: .light)
                 generator.impactOccurred()
+                
+                // Trigger celebratory haptic for major milestones
+                if capturedBuckets.count % 10 == 0 {
+                    let haptic = UINotificationFeedbackGenerator()
+                    haptic.notificationOccurred(.success)
+                }
             }
             
             capturedKeyframes.append(frame)
             self.capturedFrameCount = capturedKeyframes.count
             
-            coverage = min(Float(capturedBuckets.count) / Float(requiredKeyframes), 1.0)
+            // Coverage is now a mix of angular buckets and total keyframes
+            let bucketCoverage = Float(capturedBuckets.count) / Float(requiredKeyframes)
+            let frameCoverage = Float(capturedKeyframes.count) / Float(requiredKeyframes)
+            coverage = min(bucketCoverage * 0.7 + frameCoverage * 0.3, 1.0)
             
             if coverage >= 1.0 && capturedKeyframes.count >= requiredKeyframes {
                 finalizeCapture()
@@ -150,8 +163,8 @@ class SplatCaptureEngine: ObservableObject {
             }
         }
         
-        if stagnationCount > 180 { 
-            triggerCoaching(message: "Change your height or orbit faster")
+        if stagnationCount > 120 { // 2 seconds at 60fps
+            triggerCoaching(message: "Move to a new angle")
             stagnationCount = 0
         }
     }
@@ -161,7 +174,7 @@ class SplatCaptureEngine: ObservableObject {
             self.coachingMessage = message
             self.showCoachingPrompt = true
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                 if self.coachingMessage == message {
                     self.showCoachingPrompt = false
                 }
@@ -175,17 +188,17 @@ class SplatCaptureEngine: ObservableObject {
     private func updateInstructions(guidance: SIMD3<Float>, cameraPos: SIMD3<Float>, target: SIMD3<Float>) {
         let viewDir = simd_normalize(target - cameraPos)
         
-        if abs(guidance.y) > 0.7 {
-            self.instructions = guidance.y > 0 ? "Rise Up" : "Lower Camera"
+        // Horizontal check
+        let cross = simd_cross(viewDir, guidance)
+        
+        if abs(guidance.y) > 0.5 {
+             self.instructions = guidance.y > 0 ? "Rise Up" : "Lower Camera"
+        } else if cross.y > 0.2 {
+            self.instructions = "Orbit Right"
+        } else if cross.y < -0.2 {
+            self.instructions = "Orbit Left"
         } else {
-            let cross = simd_cross(viewDir, guidance)
-            if cross.y > 0.3 {
-                self.instructions = "Orbit Right"
-            } else if cross.y < -0.3 {
-                self.instructions = "Orbit Left"
-            } else {
-                self.instructions = "Orbit Slowly"
-            }
+            self.instructions = "Fill Gaps"
         }
     }
     
@@ -196,9 +209,19 @@ class SplatCaptureEngine: ObservableObject {
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+        // Simulate heavy processing with haptic ticks
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
+            if self.state != .processing { timer.invalidate(); return }
+            let tick = UIImpactFeedbackGenerator(style: .soft)
+            tick.prepare()
+            tick.impactOccurred()
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) {
             self.state = .complete
             self.instructions = "3D Asset Ready"
+            let haptic = UINotificationFeedbackGenerator()
+            haptic.notificationOccurred(.success)
         }
     }
 }

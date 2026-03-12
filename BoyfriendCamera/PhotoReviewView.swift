@@ -120,27 +120,7 @@ struct PhotoReviewView: View {
             fetchPhotos()
         }
     }
-}
 
-struct TabButton: View {
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundColor(isSelected ? Theme.bgPrimary : Theme.textSecondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(isSelected ? Theme.accent : Color.clear)
-                .cornerRadius(6)
-        }
-        .animation(.easeInOut(duration: 0.2), value: isSelected)
-    }
-}
-    
     private func fetchPhotos() {
         DispatchQueue.global(qos: .userInitiated).async {
             let albumName = "Boyfriend Camera"
@@ -166,6 +146,26 @@ struct TabButton: View {
         }
     }
 }
+
+struct TabButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(isSelected ? Theme.bgPrimary : Theme.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(isSelected ? Theme.accent : Color.clear)
+                .cornerRadius(6)
+        }
+        .animation(.easeInOut(duration: 0.2), value: isSelected)
+    }
+}
+
 
 // MARK: - Thumbnail Component
 struct AssetThumbnailView: View {
