@@ -117,9 +117,21 @@ struct SplatCaptureView: View {
                         .transition(.scale.combined(with: .opacity))
                     } else if engine.state == .processing {
                         VStack(spacing: 12) {
-                            ProgressView()
-                                .tint(.white)
-                                .scaleEffect(1.5)
+                            ZStack {
+                                Circle()
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 4)
+                                    .frame(width: 60, height: 60)
+                                Circle()
+                                    .trim(from: 0, to: CGFloat(engine.neuralOptimizationProgress))
+                                    .stroke(Color.yellow, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                                    .frame(width: 60, height: 60)
+                                    .rotationEffect(.degrees(-90))
+                                
+                                Text("\(Int(engine.neuralOptimizationProgress * 100))%")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.white)
+                            }
+                            
                             Text("OPTIMIZING RADIANCE FIELDS")
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.6))

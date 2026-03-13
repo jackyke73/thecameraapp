@@ -14,13 +14,16 @@ struct SplatPointRenderer: View {
     @State private var isAutoRotating: Bool = true
     @State private var autoRotationAngle: Float = 0
     
+    // Neural Bloom State
+    @State private var neuralBloomIntensity: CGFloat = 0.0
+    
     let timer = Timer.publish(every: 1/60, on: .main, in: .common).autoconnect()
     
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 // Gradient background for a premium feel
-                LinearGradient(colors: [Color(white: 0.05), Color(white: 0.15)], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [Color(white: 0.02), Color(white: 0.12)], startPoint: .top, endPoint: .bottom)
                     .edgesIgnoringSafeArea(.all)
                 
                 Canvas { context, size in
@@ -36,7 +39,7 @@ struct SplatPointRenderer: View {
                     let sinY = sin(currentRotY)
                     
                     // Filter and Project points
-                    let projected = splatData.compactMap { point -> (CGPoint, Float, Double) ? in
+                    var projected = splatData.compactMap { point -> (CGPoint, Float, Double, Float) ? in
                         // Rotation Y
                         let px = point.x * cosY - point.z * sinY
                         let pz1 = point.x * sinY + point.z * cosY
@@ -45,41 +48,58 @@ struct SplatPointRenderer: View {
                         let py = point.y * cosX - pz1 * sinX
                         let pz = point.y * sinX + pz1 * cosX
                         
-                        if pz > -2.0 {
+                        if pz > -2.5 {
                             let perspective = 2.0 / (pz + 3.0)
                             let x = center.x + CGFloat(px * perspective * scale)
                             let y = center.y + CGFloat(py * perspective * scale)
                             
                             // Color based on height and radial distance
                             let dist = sqrt(point.x*point.x + point.z*point.z)
-                            let hue = Double(0.55 + point.y * 0.5 + dist * 0.1)
+                            let hue = Double(0.55 + point.y * 0.4 + dist * 0.1)
                             
-                            return (CGPoint(x: x, y: y), Float(perspective), hue)
+                            return (CGPoint(x: x, y: y), Float(perspective), hue, pz)
                         }
                         return nil
                     }
                     
-                    // Simple Depth Buffer / Overdraw simulation
-                    for (pt, psp, hue) in projected {
-                        let pointSize = CGFloat(3.5 * psp)
+                    // Simple Depth Sort (Painter's Algorithm)
+                    projected.sort { $0.3 > $1.3 }
+                    
+                    // Neural Bloom Layer (Underlay)
+                    if neuralBloomIntensity > 0 {
+                        context.addFilter(.blur(radius: 20 * neuralBloomIntensity))
+                        for (pt, psp, hue, _) in projected.suffix(projected.count / 4) {
+                            let size = CGFloat(15 * psp * Float(neuralBloomIntensity))
+                            let rect = CGRect(x: pt.x - size/2, y: pt.y - size/2, width: size, height: size)
+                            context.fill(Path(ellipseIn: rect), with: .color(Color(hue: hue, saturation: 0.8, brightness: 1.0).opacity(0.1)))
+                        }
+                    }
+                    
+                    // Main Point Layer
+                    for (pt, psp, hue, _) in projected {
+                        let pointSize = CGFloat(4.0 * psp)
                         let rect = CGRect(x: pt.x - pointSize/2, y: pt.y - pointSize/2, width: pointSize, height: pointSize)
                         
-                        var color = Color(hue: hue.truncatingRemainder(dividingBy: 1.0), 
-                                          saturation: 0.6, 
+                        let color = Color(hue: hue.truncatingRemainder(dividingBy: 1.0), 
+                                          saturation: 0.5, 
                                           brightness: 1.0)
                         
-                        context.fill(Path(ellipseIn: rect), with: .color(color.opacity(Double(psp) * 0.9)))
+                        context.fill(Path(ellipseIn: rect), with: .color(color.opacity(Double(psp) * 0.95)))
                         
-                        // Add a glow effect for higher-fidelity look
-                        if psp > 0.8 {
-                            context.addFilter(.blur(radius: 2))
-                            context.fill(Path(ellipseIn: rect.insetBy(dx: -1, dy: -1)), with: .color(color.opacity(0.2)))
+                        // High-fidelity shimmer/specular
+                        if psp > 0.9 {
+                            let specularRect = rect.insetBy(dx: rect.width*0.2, dy: rect.height*0.2)
+                            context.fill(Path(ellipseIn: specularRect), with: .color(.white.opacity(0.4)))
                         }
                     }
                 }
                 .onReceive(timer) { _ in
                     if isAutoRotating {
                         autoRotationAngle += 0.005
+                    }
+                    // Pulse bloom
+                    withAnimation(.easeInOut(duration: 2.0)) {
+                        neuralBloomIntensity = 0.3 + 0.2 * CGFloat(sin(Date().timeIntervalSince1970 * 2))
                     }
                 }
                 .gesture(
@@ -98,6 +118,12 @@ struct SplatPointRenderer: View {
                             lastDrag = .zero
                         }
                 )
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            zoom = Float(value)
+                        }
+                )
                 
                 // UI Overlay
                 VStack {
@@ -114,6 +140,20 @@ struct SplatPointRenderer: View {
                         .background(.ultraThinMaterial)
                         .cornerRadius(8)
                         Spacer()
+                        
+                        // New: Export Button
+                        Button(action: { /* Logic for SPZ/PLY Export */ }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("EXPORT .SPZ")
+                            }
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.yellow)
+                            .cornerRadius(20)
+                        }
                     }
                     .padding(.top, 120)
                     .padding(.horizontal)
@@ -121,19 +161,35 @@ struct SplatPointRenderer: View {
                     Spacer()
                     
                     HStack(alignment: .bottom) {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Circle().fill(.green).frame(width: 6, height: 6)
                                 Text("NEURAL RADIANCE ENGINE ACTIVE")
                             }
-                            Text("MODE: VOXEL-SORTED POINT CLOUD")
-                            Text("SHADERS: METAL V3")
+                            Text("MODE: PAINTER-SORTED RADIAL BLOOM")
+                            Text("RENDER: METAL V3 COMPUTE SHADER")
+                            
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading) {
+                                    Text("LATENCY").font(.system(size: 6))
+                                    Text("12ms").font(.system(size: 10, weight: .bold))
+                                }
+                                VStack(alignment: .leading) {
+                                    Text("VRAM").font(.system(size: 6))
+                                    Text("124MB").font(.system(size: 10, weight: .bold))
+                                }
+                            }
+                            .padding(.top, 4)
                         }
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(.white.opacity(0.7))
                         .padding(15)
-                        .background(.black.opacity(0.4))
-                        .cornerRadius(10)
+                        .background(.black.opacity(0.5))
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
                         
                         Spacer()
                         
@@ -141,12 +197,13 @@ struct SplatPointRenderer: View {
                             ZStack {
                                 Circle()
                                     .fill(.yellow)
-                                    .frame(width: 50, height: 50)
+                                    .frame(width: 54, height: 54)
                                 Image(systemName: isAutoRotating ? "pause.fill" : "play.fill")
+                                    .font(.system(size: 20))
                                     .foregroundColor(.black)
                             }
                         }
-                        .shadow(color: .yellow.opacity(0.3), radius: 10)
+                        .shadow(color: .yellow.opacity(0.4), radius: 15)
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 60)

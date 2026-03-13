@@ -25,6 +25,7 @@ class SplatCaptureEngine: ObservableObject {
     @Published var coachingMessage: String = ""
     @Published var capturedSplatPoints: [SIMD3<Float>] = []
     @Published var totalPointsInWorld: Int = 0
+    @Published var neuralOptimizationProgress: Float = 0.0
 
     private var capturedKeyframes: [ARFrame] = []
     private var centerPoint: simd_float3?
@@ -205,23 +206,34 @@ class SplatCaptureEngine: ObservableObject {
     private func finalizeCapture() {
         self.state = .processing
         self.instructions = "Generating Splats..."
+        self.neuralOptimizationProgress = 0.0
         
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
         
-        // Simulate heavy processing with haptic ticks
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
-            if self.state != .processing { timer.invalidate(); return }
-            let tick = UIImpactFeedbackGenerator(style: .soft)
-            tick.prepare()
-            tick.impactOccurred()
-        }
+        // Simulate heavy processing with haptic ticks and progress
+        let totalSteps = 45
+        var currentStep = 0
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) {
-            self.state = .complete
-            self.instructions = "3D Asset Ready"
-            let haptic = UINotificationFeedbackGenerator()
-            haptic.notificationOccurred(.success)
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
+            if self.state != .processing { timer.invalidate(); return }
+            
+            currentStep += 1
+            self.neuralOptimizationProgress = Float(currentStep) / Float(totalSteps)
+            
+            if currentStep % 10 == 0 {
+                let tick = UIImpactFeedbackGenerator(style: .soft)
+                tick.prepare()
+                tick.impactOccurred()
+            }
+            
+            if currentStep >= totalSteps {
+                timer.invalidate()
+                self.state = .complete
+                self.instructions = "3D Asset Ready"
+                let haptic = UINotificationFeedbackGenerator()
+                haptic.notificationOccurred(.success)
+            }
         }
     }
 }
