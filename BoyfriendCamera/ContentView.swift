@@ -641,7 +641,7 @@ struct ContentView: View {
                     MapScreen(locationManager: locationManager, landmark: targetLandmarkBinding)
                 }
                 .fullScreenCover(isPresented: $showPhotoReview) {
-                    PhotoReviewView()
+                    GalleryView()
                 }
                 .fullScreenCover(isPresented: $showDirectorMode) {
                     SplatCaptureView()
