@@ -26,6 +26,10 @@ class SplatCaptureEngine: ObservableObject {
     @Published var capturedSplatPoints: [SIMD3<Float>] = []
     @Published var totalPointsInWorld: Int = 0
     @Published var neuralOptimizationProgress: Float = 0.0
+    
+    // New: Social Vibe States
+    @Published var currentVibeScore: Float = 0.0
+    @Published var capturedMediaURL: URL? = nil
 
     private var capturedKeyframes: [ARFrame] = []
     private var centerPoint: simd_float3?
@@ -51,6 +55,7 @@ class SplatCaptureEngine: ObservableObject {
         self.coverage = 0.0
         self.capturedFrameCount = 0
         self.instructions = "Slowly orbit the object"
+        self.currentVibeScore = 0.0
         
         Task {
             await worldMap.reset()
@@ -67,6 +72,7 @@ class SplatCaptureEngine: ObservableObject {
         let cameraPos = simd_make_float3(cameraTransform.columns.3)
         
         processFrameForCoverage(frame, cameraPos: cameraPos, center: center)
+        calculateSocialVibe(frame: frame)
     }
     
     private func processFrameForCoverage(_ frame: ARFrame, cameraPos: simd_float3, center: simd_float3) {
@@ -150,6 +156,27 @@ class SplatCaptureEngine: ObservableObject {
             if coverage >= 1.0 && capturedKeyframes.count >= requiredKeyframes {
                 finalizeCapture()
             }
+        }
+    }
+    
+    /// Experimental: Calculate "Social Vibe" based on movement smoothness and environment lighting
+    private func calculateSocialVibe(frame: ARFrame) {
+        // Higher score for smooth, cinematic movement
+        let velocity = frame.camera.trackingState
+        var score: Float = 0.5
+        
+        if case .normal = velocity {
+            score += 0.2
+        }
+        
+        // Lighting check
+        if let lightEstimate = frame.lightEstimate {
+            let intensity = lightEstimate.ambientIntensity / 1000.0 // Normal is ~1000
+            score += min(intensity * 0.1, 0.3)
+        }
+        
+        DispatchQueue.main.async {
+            self.currentVibeScore = (self.currentVibeScore * 0.95) + (score * 0.05)
         }
     }
     

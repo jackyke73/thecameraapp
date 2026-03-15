@@ -31,14 +31,14 @@ struct SplatCaptureView: View {
                     Spacer()
                     
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text("3D CAPTURE")
+                        Text("SPLATMARKET")
                             .font(.system(size: 10, weight: .black))
                             .tracking(2)
-                            .foregroundColor(.white.opacity(0.6))
+                            .foregroundColor(.yellow)
                         
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(.red)
+                                .fill(engine.state == .capturing ? .red : .gray)
                                 .frame(width: 6, height: 6)
                             Text("\(engine.totalPointsInWorld) PTS")
                                 .font(.system(size: 8, design: .monospaced))
@@ -58,6 +58,16 @@ struct SplatCaptureView: View {
                 .padding(.horizontal)
                 
                 Spacer()
+                
+                // Vibe Score Meter (Right Side)
+                if engine.state == .capturing {
+                    HStack {
+                        Spacer()
+                        VibeMeter(score: engine.currentVibeScore)
+                            .frame(width: 40, height: 200)
+                            .padding(.trailing, 20)
+                    }
+                }
                 
                 // Guidance Indicator (Active AG-Splatting)
                 if engine.state == .capturing, let guide = engine.guidanceVector {
@@ -87,7 +97,7 @@ struct SplatCaptureView: View {
                     if engine.state == .capturing || engine.state == .processing {
                         VStack(spacing: 8) {
                             HStack {
-                                Text("COVERAGE")
+                                Text("MODEL COVERAGE")
                                     .font(.system(size: 10, weight: .bold))
                                 Spacer()
                                 Text("\(Int(engine.coverage * 100))%")
@@ -106,13 +116,14 @@ struct SplatCaptureView: View {
                         Button(action: { 
                             showingReview = true 
                         }) {
-                            Text("VIEW 3D ASSET")
+                            Text("POST TO FEED")
                                 .font(.system(size: 14, weight: .black))
                                 .foregroundColor(.black)
                                 .padding(.horizontal, 30)
                                 .padding(.vertical, 15)
                                 .background(Color.yellow)
                                 .cornerRadius(30)
+                                .shadow(color: .yellow.opacity(0.3), radius: 10)
                         }
                         .transition(.scale.combined(with: .opacity))
                     } else if engine.state == .processing {
@@ -132,7 +143,7 @@ struct SplatCaptureView: View {
                                     .foregroundColor(.white)
                             }
                             
-                            Text("OPTIMIZING RADIANCE FIELDS")
+                            Text("TRAINING GAUSSIANS")
                                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.6))
                         }
@@ -176,7 +187,7 @@ struct SplatCaptureView: View {
                                 .clipShape(Circle())
                         }
                         Spacer()
-                        Text("3D PREVIEW")
+                        Text("SPLATMARKET PREVIEW")
                             .font(.system(size: 12, weight: .black))
                             .foregroundColor(.white)
                         Spacer()
@@ -194,7 +205,7 @@ struct SplatCaptureView: View {
                     
                     Spacer()
                     
-                    Text("SWIPE TO ROTATE")
+                    Text("SWIPE TO ROTATE • PINCH TO ZOOM")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundColor(.white.opacity(0.4))
                         .padding(.bottom, 40)
@@ -214,6 +225,32 @@ struct SplatCaptureView: View {
             translation.columns.3.z = -1.0 // 1m forward
             let center = (transform * translation).columns.3
             engine.startCapture(at: simd_make_float3(center.x, center.y, center.z))
+        }
+    }
+}
+
+struct VibeMeter: View {
+    let score: Float
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("VIBE")
+                .font(.system(size: 8, weight: .black))
+                .foregroundColor(.yellow)
+            
+            ZStack(alignment: .bottom) {
+                Capsule()
+                    .fill(Color.white.opacity(0.1))
+                    .frame(width: 6)
+                
+                Capsule()
+                    .fill(LinearGradient(colors: [.yellow, .orange, .red], startPoint: .top, endPoint: .bottom))
+                    .frame(width: 6, height: 200 * CGFloat(score))
+            }
+            
+            Text("\(Int(score * 100))")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(.white)
         }
     }
 }

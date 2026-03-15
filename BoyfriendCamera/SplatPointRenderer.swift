@@ -2,7 +2,7 @@ import SwiftUI
 import MetalKit
 import Combine
 
-/// A high-performance, point-cloud based Splat Previewer.
+/// A high-performance, point-cloud based Splat Previewer with SplatMarket Social Vibe.
 struct SplatPointRenderer: View {
     let splatData: [SIMD3<Float>]
     
@@ -129,10 +129,10 @@ struct SplatPointRenderer: View {
                 VStack {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("3D RECONSTRUCTION")
+                            Text("SPLATMARKET ASSET")
                                 .font(.system(size: 10, weight: .black))
                                 .foregroundColor(.yellow)
-                            Text("\(splatData.count) POINTS GENERATED")
+                            Text("\(splatData.count) POINTS CAPTURED")
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.8))
                         }
@@ -141,21 +141,37 @@ struct SplatPointRenderer: View {
                         .cornerRadius(8)
                         Spacer()
                         
-                        // New: Export Button
-                        Button(action: { /* Logic for SPZ/PLY Export */ }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "square.and.arrow.up")
-                                Text("EXPORT .SPZ")
+                        // Action Buttons
+                        VStack(spacing: 8) {
+                            Button(action: { /* Logic for SPZ/PLY Export */ }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "square.and.arrow.up")
+                                    Text("SHARE")
+                                }
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(Color.yellow)
+                                .cornerRadius(20)
                             }
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.black)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.yellow)
-                            .cornerRadius(20)
+                            
+                            Button(action: { /* Mint action */ }) {
+                                Text("MINT ON-CHAIN")
+                                    .font(.system(size: 8, weight: .black))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(.white.opacity(0.1))
+                                    .cornerRadius(20)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
                         }
                     }
-                    .padding(.top, 120)
+                    .padding(.top, 100)
                     .padding(.horizontal)
                     
                     Spacer()
@@ -164,19 +180,19 @@ struct SplatPointRenderer: View {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Circle().fill(.green).frame(width: 6, height: 6)
-                                Text("NEURAL RADIANCE ENGINE ACTIVE")
+                                Text("SPLAT ENGINE 2.0 ACTIVE")
                             }
-                            Text("MODE: PAINTER-SORTED RADIAL BLOOM")
-                            Text("RENDER: METAL V3 COMPUTE SHADER")
+                            Text("MODE: SOCIAL INFINITE FEED READY")
+                            Text("FORMAT: KHR_GAUSSIAN_SPLAT_SPZ")
                             
                             HStack(spacing: 12) {
                                 VStack(alignment: .leading) {
-                                    Text("LATENCY").font(.system(size: 6))
-                                    Text("12ms").font(.system(size: 10, weight: .bold))
+                                    Text("QUALITY").font(.system(size: 6))
+                                    Text("ULTRA").font(.system(size: 10, weight: .bold))
                                 }
                                 VStack(alignment: .leading) {
-                                    Text("VRAM").font(.system(size: 6))
-                                    Text("124MB").font(.system(size: 10, weight: .bold))
+                                    Text("SIZE").font(.system(size: 6))
+                                    Text("2.4 MB").font(.system(size: 10, weight: .bold))
                                 }
                             }
                             .padding(.top, 4)
