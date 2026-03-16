@@ -51,6 +51,20 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(spacing: 24) {
                         
+                        // NEW PREVIEW HUD SECTION
+                        if cameraManager.isAIFeaturesEnabled {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("HUD PREVIEW")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.gray)
+                                    .tracking(1)
+                                
+                                DirectorHUD(cameraManager: cameraManager)
+                                    .scaleEffect(0.9)
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+
                         // Section: Director Mode
                         SettingsSection(title: "Director Mode") {
                             SettingsToggle(
