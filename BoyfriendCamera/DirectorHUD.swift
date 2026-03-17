@@ -67,9 +67,13 @@ struct DirectorHUD: View {
             
             // Bottom: Composition Score & Analysis
             VStack(alignment: .leading, spacing: 4) {
-                Text("COMPOSITION_SCORE")
-                    .font(DirectorTheme.fontMain)
-                    .foregroundColor(DirectorTheme.secondary)
+                HStack {
+                    Text("COMPOSITION_SCORE")
+                    Spacer()
+                    Text("\(Int(cameraManager.semanticAnalysis.compositionScore * 100))%")
+                }
+                .font(DirectorTheme.fontMain)
+                .foregroundColor(DirectorTheme.secondary)
                 
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -83,6 +87,31 @@ struct DirectorHUD: View {
                     }
                 }
                 .frame(height: 4)
+                
+                if let cinematic = cameraManager.cinematicScore {
+                    HStack {
+                        Text("CINEMATIC_STABILITY")
+                        Spacer()
+                        Text(cinematic.feedback)
+                            .foregroundColor(cinematic.color)
+                    }
+                    .font(DirectorTheme.fontMain)
+                    .foregroundColor(DirectorTheme.secondary)
+                    .padding(.top, 4)
+                    
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.white.opacity(0.1))
+                                .frame(height: 4)
+                            
+                            Rectangle()
+                                .fill(cinematic.color)
+                                .frame(width: geo.size.width * CGFloat(cinematic.value), height: 4)
+                        }
+                    }
+                    .frame(height: 4)
+                }
                 
                 Text(cameraManager.semanticAnalysis.sceneDescription.uppercased())
                     .font(DirectorTheme.fontMain)

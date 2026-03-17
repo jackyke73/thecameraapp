@@ -129,8 +129,19 @@ actor SemanticDirectorEngine: DirectorEngineProtocol {
                         leftShoulder.confidence > 0.6 && rightShoulder.confidence > 0.6 {
                          
                          let tilt = leftShoulder.location.y - rightShoulder.location.y
-                         if abs(tilt) > 0.05 { // 5% height difference
-                             poseFeedback = "Level your shoulders!"
+                         if abs(tilt) > 0.04 { // 4% height difference
+                             poseFeedback = "Level shoulders!"
+                             score = 0.5
+                         }
+                     }
+                     
+                     // Check Hand Interaction (High value for Candid)
+                     if let leftHand = joints?[.leftWrist], let rightHand = joints?[.rightWrist],
+                        leftHand.confidence > 0.7 || rightHand.confidence > 0.7 {
+                         
+                         if poseType == "Portrait" {
+                             poseType = "Candid Pose"
+                             score += 0.1
                          }
                      }
                 }

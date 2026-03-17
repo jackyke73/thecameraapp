@@ -11,6 +11,13 @@ struct CinematicScore {
     let velocityScore: Double // 0.0 to 1.0 (1.0 is ideal speed)
     let feedback: String // User-facing feedback
     let isStable: Bool
+    
+    // UI Helpers
+    var color: Color {
+        if value > 0.8 { return .green }
+        if value > 0.5 { return .yellow }
+        return .red
+    }
 }
 
 class CinematicScorer {
@@ -70,13 +77,13 @@ class CinematicScorer {
         // Feedback
         var feedback = ""
         if stabilityScore < 0.6 {
-            feedback = "Stabilize Hand"
+            feedback = "STABILIZE"
         } else if velocityScore < 0.4 {
-            feedback = "Slow Down"
+            feedback = "SLOW DOWN"
         } else if smoothedVelocity > 0.05 {
-            feedback = "Cinematic Pan"
+            feedback = "CINEMATIC PAN"
         } else {
-            feedback = "Steady"
+            feedback = "STEADY"
         }
         
         return CinematicScore(
