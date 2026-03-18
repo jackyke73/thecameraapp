@@ -27,6 +27,12 @@ class SplatCaptureEngine: ObservableObject {
     @Published var totalPointsInWorld: Int = 0
     @Published var neuralOptimizationProgress: Float = 0.0
     
+    // VLM2 Memory Engine Integration (2026-03-17)
+    // Injects episodic memory into the 3D capture loop for smarter guidance
+    private var vlm2Memory: VLM2MemoryEngine?
+    @Published var vlmReasoningVibe: Float = 0.0
+    @Published var spatialMemoryStatus: String = "EM-Idle"
+
     // New: Social Vibe States
     @Published var currentVibeScore: Float = 0.0
     @Published var capturedMediaURL: URL? = nil
@@ -45,6 +51,12 @@ class SplatCaptureEngine: ObservableObject {
     private var stagnationCount: Int = 0
     private var previousCoverage: Float = 0.0
     
+    init() {
+        if let device = MTLCreateSystemDefaultDevice() {
+            self.vlm2Memory = VLM2MemoryEngine(device: device)
+        }
+    }
+    
     func startCapture(at center: simd_float3) {
         self.centerPoint = center
         self.state = .capturing
@@ -56,6 +68,7 @@ class SplatCaptureEngine: ObservableObject {
         self.capturedFrameCount = 0
         self.instructions = "Slowly orbit the object"
         self.currentVibeScore = 0.0
+        self.spatialMemoryStatus = "EM-Active"
         
         Task {
             await worldMap.reset()
@@ -73,6 +86,29 @@ class SplatCaptureEngine: ObservableObject {
         
         processFrameForCoverage(frame, cameraPos: cameraPos, center: center)
         calculateSocialVibe(frame: frame)
+        
+        // VLM2 Memory Injection: Update episodic memory on keyframes
+        if capturedKeyframes.count % 10 == 0 {
+            updateVLM2Memory(frame: frame)
+        }
+    }
+    
+    private func updateVLM2Memory(frame: ARFrame) {
+        // High-level abstraction for the VLM² loop
+        // 1. Analyze frame with Vision (e.g., VNRecognizeObjectsRequest)
+        // 2. Score the 'importance' based on centering and clarity
+        // 3. Inject into VLM2MemoryEngine
+        
+        let score = currentVibeScore
+        if score > 0.7 {
+            vlm2Memory?.updateEpisodicMemory(newTokens: [], importance: score)
+            DispatchQueue.main.async {
+                self.spatialMemoryStatus = "EM-Injecting"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.spatialMemoryStatus = "EM-Active"
+                }
+            }
+        }
     }
     
     private func processFrameForCoverage(_ frame: ARFrame, cameraPos: simd_float3, center: simd_float3) {

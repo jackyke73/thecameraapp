@@ -30,7 +30,7 @@ struct SplatCaptureView: View {
                     
                     Spacer()
                     
-                    VStack(alignment: .trailing, spacing: 4) {
+                        VStack(alignment: .trailing, spacing: 4) {
                         Text("SPLATMARKET")
                             .font(.system(size: 10, weight: .black))
                             .tracking(2)
@@ -38,8 +38,11 @@ struct SplatCaptureView: View {
                         
                         HStack(spacing: 4) {
                             Circle()
-                                .fill(engine.state == .capturing ? .red : .gray)
+                                .fill(engine.state == .capturing ? (engine.spatialMemoryStatus.contains("Inject") ? .green : .red) : .gray)
                                 .frame(width: 6, height: 6)
+                            Text(engine.spatialMemoryStatus)
+                                .font(.system(size: 8, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.8))
                             Text("\(engine.totalPointsInWorld) PTS")
                                 .font(.system(size: 8, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.8))
