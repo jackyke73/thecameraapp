@@ -37,11 +37,12 @@ struct DirectorLogic {
         faceBounds: CGRect?,
         targetPoint: CGPoint,
         deviceRoll: Double,
-        devicePitch: Double, // New Parameter
+        devicePitch: Double, 
         isLevel: Bool,
         expressions: [String],
-        lighting: LightingQuality = .good, // New Parameter
-        yoloCommand: String? = nil
+        lighting: LightingQuality = .good, 
+        yoloCommand: String? = nil,
+        depthGrid: [[Float]]? = nil // VLM2 Memory-Augmented Parameter
     ) -> DirectorInstruction {
         
         // 0. Sovereign AI Override (Highest Priority if meaningful)
@@ -63,7 +64,7 @@ struct DirectorLogic {
             return DirectorInstruction(text: "Find your Subject", icon: "person.fill.viewfinder", color: .yellow, priority: .high, haptic: .none)
         }
         
-        // 2b. Lighting Check (New)
+        // 2b. Lighting Check
         if lighting == .poor {
              return DirectorInstruction(text: "Too Dark - Find Light", icon: "sun.max.trianglebadge.exclamationmark", color: .yellow, priority: .high, haptic: .warning)
         } else if lighting == .tooBright {
@@ -71,27 +72,32 @@ struct DirectorLogic {
         }
         
         // 3. Perspective: Pitch Correction (Angle of Attack)
-        // Most portraits look best when the phone is vertical (parallel to subject).
-        // devicePitch is gravity.z. 
-        // When holding phone upright in portrait:
-        // gravity.z should be close to 0.0 (vertical). 
-        // If > 0, phone is leaning back (looking up). If < 0, phone is leaning forward (looking down).
-        
         if abs(devicePitch) > pitchThreshold {
              if devicePitch > pitchThreshold {
-                 // Phone is looking up (tilted back). Usually bad for portraits (nostril view).
                  return DirectorInstruction(text: "Angle Forward", icon: "arrow.turn.right.down", color: .orange, priority: .high, haptic: .correction)
              } else {
-                 // Phone is looking down (tilted forward). Makes subject look small/short.
                  return DirectorInstruction(text: "Angle Upward", icon: "arrow.turn.right.up", color: .orange, priority: .high, haptic: .correction)
              }
         }
         
-        // 4. Distance: Check Face Size
+        // 4. VLM² Contextual Depth Reasoning
+        // Using the 3x3 depth grid from the VLM Memory Engine (DepthAnythingV2)
+        if let grid = depthGrid {
+            let centerDepth = grid[1][1]
+            let topLeftDepth = grid[0][0]
+            let topRightDepth = grid[0][2]
+            
+            // Logic: If center (subject) is too close to background (similar depth),
+            // recommend moving for better bokeh/depth separation.
+            let backgroundDepth = (topLeftDepth + topRightDepth) / 2.0
+            if abs(centerDepth - backgroundDepth) < 0.1 && centerDepth < 0.8 {
+                return DirectorInstruction(text: "Move for Depth Separation", icon: "camera.aperture", color: .blue, priority: .medium, haptic: .warning)
+            }
+        }
+        
+        // 5. Distance: Check Face Size
         if let face = faceBounds {
             let faceWidth = face.width
-            // Vision coordinates are normalized (0.0 to 1.0)
-            
             if faceWidth < 0.15 {
                 return DirectorInstruction(text: "Move Closer", icon: "arrow.up.left.and.arrow.down.right", color: .orange, priority: .medium, haptic: .correction)
             } else if faceWidth > 0.6 {
@@ -99,29 +105,21 @@ struct DirectorLogic {
             }
         }
         
-        // 4. Framing: Center the subject (using nose point)
+        // 6. Framing: Center the subject (using nose point)
         if let nose = nosePoint {
-            // Mirroring fix: Nose coordinates from Vision are often mirrored compared to preview
             let mirroredNoseX = 1.0 - nose.x
             let dx = mirroredNoseX - targetPoint.x
             let dy = nose.y - targetPoint.y 
             let dist = sqrt(dx*dx + dy*dy)
             
             if dist > alignmentThreshold {
-                // Determine direction
-                // Assuming nosePoint and targetPoint are in the same 0..1 coordinate space (Preview space)
-                // If nose.x > target.x, nose is to the right, so we need to move camera Right (to bring subject Left? No, pan Right to bring subject Left in frame)
-                // Actually, if subject is to the Right of center, we need to Turn Right to center them.
-                
                 if abs(dx) > abs(dy) {
-                    // Horizontal correction
                     if dx > 0 {
                         return DirectorInstruction(text: "Pan Right", icon: "arrow.right", color: .orange, priority: .medium, haptic: .correction)
                     } else {
                         return DirectorInstruction(text: "Pan Left", icon: "arrow.left", color: .orange, priority: .medium, haptic: .correction)
                     }
                 } else {
-                    // Vertical correction
                     if dy > 0 {
                          return DirectorInstruction(text: "Tilt Down", icon: "arrow.down", color: .orange, priority: .medium, haptic: .correction)
                     } else {
@@ -131,14 +129,14 @@ struct DirectorLogic {
             }
         }
         
-        // 4. Expression / Vibe
+        // 7. Expression / Vibe
         if let firstExpr = expressions.first {
             if firstExpr == "Neutral" || firstExpr == "Sad" || firstExpr == "Angry" {
                  return DirectorInstruction(text: "Make her laugh!", icon: "face.smiling", color: .blue, priority: .low, haptic: .warning)
             }
         }
         
-        // 5. Success
+        // 8. Success
         return DirectorInstruction(text: "Perfect! Shoot!", icon: "camera.shutter.button.fill", color: .green, priority: .high, haptic: .success)
     }
 }

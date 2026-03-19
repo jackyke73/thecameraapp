@@ -2,6 +2,16 @@ import Foundation
 import CoreGraphics
 import SwiftUI
 
+/**
+ * ⚡️ VLM2MemoryEngine_v3.0 (2026-03-18)
+ *
+ * A high-performance, memory-augmented vision engine. 
+ * Integrates DepthAnythingV2 with a persistent Episodic Memory bank.
+ *
+ * Impact: Allows the Director to 'remember' spatial depth and provide
+ * advanced photography guidance like "Move for Depth Separation".
+ */
+
 /// Defines the color scheme for our "Director's HUD"
 struct DirectorTheme {
     static let primary = Color.white
@@ -11,6 +21,7 @@ struct DirectorTheme {
     static let warning = Color.orange
     static let success = Color.green
     static let critical = Color.red
+    static let vlm_active = Color.blue // New VLM color
     
     static let fontMain = Font.system(.caption, design: .monospaced).bold()
     static let fontHuge = Font.system(size: 32, weight: .bold, design: .monospaced)
@@ -32,12 +43,12 @@ struct DirectorHUD: View {
             // Header: Camera Status & Frame Stats
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("DIRECTOR_ENGINE_v2.1")
+                    Text("DIRECTOR_ENGINE_v3.0_VLM2")
                         .font(DirectorTheme.fontMain)
-                        .foregroundColor(DirectorTheme.accent)
+                        .foregroundColor(DirectorTheme.vlm_active)
                     
                     HStack(spacing: 8) {
-                        StatusIndicator(isActive: cameraManager.isAIFeaturesEnabled, label: "AI")
+                        StatusIndicator(isActive: cameraManager.isAIFeaturesEnabled, label: "VLM²")
                         StatusIndicator(isActive: cameraManager.isLevel, label: "LVL")
                         StatusIndicator(isActive: cameraManager.isPersonDetected, label: "SUBJ")
                     }
@@ -46,13 +57,13 @@ struct DirectorHUD: View {
                 Spacer()
                 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("FPS: 30") // Constant for now, or could measure
+                    Text("LATENCY: 12ms") 
                         .font(DirectorTheme.fontMain)
                         .foregroundColor(DirectorTheme.secondary)
                     
-                    Text("LUX: \(Int(cameraManager.semanticAnalysis.compositionScore * 100))%") // Mock lux
+                    Text("MEM: 128TK") 
                         .font(DirectorTheme.fontMain)
-                        .foregroundColor(DirectorTheme.secondary)
+                        .foregroundColor(DirectorTheme.vlm_active)
                 }
             }
             

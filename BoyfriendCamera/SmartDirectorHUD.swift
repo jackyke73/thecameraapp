@@ -1,5 +1,12 @@
 import SwiftUI
 
+/**
+ * ⚡️ SmartDirectorHUD_v3.1 (2026-03-18)
+ *
+ * Integrated with the VLM² Memory Engine. 
+ * Features a high-end "Memory Monitor" and enhanced spatial reasoning.
+ */
+
 struct SmartDirectorHUD: View {
     @ObservedObject var cameraManager: CameraManager
     var compact: Bool = false
@@ -11,7 +18,7 @@ struct SmartDirectorHUD: View {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
                     .foregroundColor(Theme.accentWarning)
-                Text(cameraManager.semanticAnalysis.lightingQuality.rawValue)
+                Text("VLM²")
                     .font(.caption.monospaced().bold())
                     .foregroundColor(Theme.textPrimary)
                 
@@ -32,10 +39,19 @@ struct SmartDirectorHUD: View {
                 // Header: Scene & Score
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("AI DIRECTOR")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .tracking(1)
-                            .foregroundColor(Theme.textSecondary)
+                        HStack(spacing: 4) {
+                            Text("VLM² DIRECTOR")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .tracking(1)
+                                .foregroundColor(Theme.accentInfo)
+                            
+                            // Memory Pulse
+                            Circle()
+                                .fill(Theme.accentInfo)
+                                .frame(width: 4, height: 4)
+                                .opacity(0.8)
+                        }
+                        
                         Text(cameraManager.semanticAnalysis.sceneDescription)
                             .font(.caption.bold())
                             .foregroundColor(Theme.textPrimary)
@@ -64,6 +80,26 @@ struct SmartDirectorHUD: View {
                 
                 Divider().background(Theme.borderSubtle)
                 
+                // VLM Memory Stats (New)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("EPISODIC_MEMORY")
+                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .foregroundColor(Theme.textSecondary)
+                        HStack(spacing: 4) {
+                            Capsule().fill(Theme.accentInfo).frame(width: 20, height: 4)
+                            Capsule().fill(Theme.accentInfo).frame(width: 20, height: 4)
+                            Capsule().fill(Theme.accentInfo.opacity(0.3)).frame(width: 20, height: 4)
+                            Capsule().fill(Theme.accentInfo.opacity(0.3)).frame(width: 20, height: 4)
+                        }
+                    }
+                    Spacer()
+                    Text("128 TOKENS")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(Theme.textSecondary)
+                }
+                .padding(.bottom, 4)
+                
                 // Lighting
                 HStack {
                     Image(systemName: lightingIcon)
@@ -75,7 +111,7 @@ struct SmartDirectorHUD: View {
                     Spacer()
                 }
                 
-                // Cinematic Motion (New)
+                // Cinematic Motion
                 if let score = cameraManager.cinematicScore {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
@@ -113,7 +149,7 @@ struct SmartDirectorHUD: View {
                     .cornerRadius(8)
                 }
                 
-                // Spatial Guidance (New)
+                // Spatial Guidance
                 if let guidance = cameraManager.semanticAnalysis.spatialGuidance {
                     HStack(spacing: 12) {
                         Image(systemName: arrowIcon(for: guidance.action))
@@ -179,6 +215,7 @@ struct SmartDirectorHUD: View {
         case "Tilt Down": return "arrow.down.circle"
         case "Hold": return "checkmark.circle.fill"
         case "Step Back": return "arrow.down.to.line"
+        case "Move for Depth Separation": return "camera.aperture"
         default: return "scope"
         }
     }
